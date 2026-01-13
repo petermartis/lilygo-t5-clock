@@ -101,6 +101,7 @@ RTC_DATA_ATTR bool firstRun = true;
 RTC_DATA_ATTR int minute = -1;
 RTC_DATA_ATTR int dayOfWeek = -1;
 RTC_DATA_ATTR int vref = 1100;
+RTC_DATA_ATTR bool adcCalibrated = false;  // Cache ADC calibration status
 RTC_DATA_ATTR int batt = 5;
 RTC_DATA_ATTR float voltage = -1;
 RTC_DATA_ATTR char tod[10];
@@ -132,12 +133,11 @@ void setFont(GFXfont const &font) {
 	currentFont = font;
 }
 
-void clearString(int x, int y, String text, alignment align) {
-	char *data  = const_cast<char*>(text.c_str());
+void clearString(int x, int y, const char* text, alignment align) {
 	int x1, y1;
 	int w, h;
 	int xx = x, yy = y;
-	get_text_bounds(&currentFont, data, &xx, &yy, &x1, &y1, &w, &h, NULL);
+	get_text_bounds(&currentFont, (char*)text, &xx, &yy, &x1, &y1, &w, &h, NULL);
 	if (align == RIGHT)  x = x - w;
 	if (align == CENTER) x = x - w / 2;
 	Rect_t area = {
@@ -149,18 +149,17 @@ void clearString(int x, int y, String text, alignment align) {
 	epd_clear_area(area);
 }
 
-void drawString(int x, int y, String text, alignment align) {
-	char *data  = const_cast<char*>(text.c_str());
+void drawString(int x, int y, const char* text, alignment align) {
 	int x1, y1;
 	int w, h;
 	int xx = x, yy = y;
-	get_text_bounds(&currentFont, data, &xx, &yy, &x1, &y1, &w, &h, NULL);
+	get_text_bounds(&currentFont, (char*)text, &xx, &yy, &x1, &y1, &w, &h, NULL);
 	if (align == RIGHT)  x = x - w;
 	if (align == CENTER) x = x - w / 2;
-	writeln((GFXfont *)&currentFont, data, &x, &y, NULL);
+	writeln((GFXfont *)&currentFont, (char*)text, &x, &y, NULL);
 }
 
-void drawString(int x, int y, String text, String old_text, alignment align) {
+void drawString(int x, int y, const char* text, const char* old_text, alignment align) {
 	if (!firstRun) {
 		clearString(x, y, old_text, align);
 	}
@@ -206,11 +205,13 @@ void setClock() {
 }
 
 void getVoltage() {
-	// Correct the ADC reference voltage
-	esp_adc_cal_characteristics_t adc_chars;
-	esp_adc_cal_value_t val_type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
-	if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) vref = adc_chars.vref;
-	delay(10); // Make adc measurement more accurate
+	// Calibrate ADC only once - cache result in RTC memory
+	if (!adcCalibrated) {
+		esp_adc_cal_characteristics_t adc_chars;
+		esp_adc_cal_value_t val_type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
+		if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) vref = adc_chars.vref;
+		adcCalibrated = true;
+	}
 	uint16_t v = analogRead(BATT_PIN);
 	float _voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
 	if (_voltage != voltage) {
@@ -254,14 +255,21 @@ void drawVoltage() {
 	redrawVoltage();
 }
 
-void enableWifi() {
+#define WIFI_TIMEOUT_MS 15000
+
+bool enableWifi() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(100);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
-	while (WiFi.status() != WL_CONNECTED) {
-		delay(1000);
+    unsigned long startAttempt = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+        if (millis() - startAttempt >= WIFI_TIMEOUT_MS) {
+            return false;  // Timeout - prevent infinite loop
+        }
+        delay(250);  // Finer polling interval
     }
+    return true;
 }
 
 void disableWifi() {
@@ -269,18 +277,25 @@ void disableWifi() {
 	WiFi.mode(WIFI_OFF);
 }
 
-void ntpUpdate() {
+bool ntpUpdate(bool wifiAlreadyEnabled = false) {
 
-	enableWifi();
+	if (!wifiAlreadyEnabled) {
+		if (!enableWifi()) {
+			time(&lastNtpUpdate);
+			return false;
+		}
+	}
 	timeClient.begin();
 	bool updated = timeClient.update();
 	timeClient.end();
-	disableWifi();
+	if (!wifiAlreadyEnabled) {
+		disableWifi();
+	}
 
 	if (updated) setUnixtime(timeClient.getEpochTime());
 
 	time(&lastNtpUpdate);
-
+	return updated;
 }
 
 void redrawWeather() {
@@ -327,11 +342,18 @@ void drawWeather() {
 
 }
 
-void getWeather() {
+void getWeather(bool wifiAlreadyEnabled = false) {
 
-	enableWifi();
+	if (!wifiAlreadyEnabled) {
+		if (!enableWifi()) {
+			time(&lastWeatherUpdate);
+			return;
+		}
+	}
 	bool updated = weather.updateStatus(&w);
-	disableWifi();
+	if (!wifiAlreadyEnabled) {
+		disableWifi();
+	}
 
 	time(&lastWeatherUpdate);
 	struct tm now;
@@ -342,7 +364,7 @@ void getWeather() {
 		_drawWeather = true;
 
 		sprintf(_wIcon, "%s", weather.getIcon(w.icon));
-		if (wIcon != _wIcon) _drawWicon = true;
+		if (strcmp(wIcon, _wIcon) != 0) _drawWicon = true;
 
 		sprintf(_wTemp, "%.1fc", w.current_Temp);
 		if (strcmp(wTemp, _wTemp) != 0) _drawTemp = true;
@@ -351,7 +373,7 @@ void getWeather() {
 		if (strcmp(wFeels, _wFeels) != 0) _drawFtemp = true;
 
 		int ws = w.wind_speed * 3.6;
-		String wd = weather.getWindDirection(w.wind_direction);
+		const char* wd = weather.getWindDirection(w.wind_direction);
 		sprintf(_wWind, "Wind: %d km/h %s", ws, wd);
 		if (strcmp(wWind, _wWind) != 0) _drawWind = true;
 
@@ -408,11 +430,19 @@ void setup() {
 	disableCore0WDT(); // Network requests may block long enough to trigger watchdog
 
 	if (firstRun) {
-		ntpUpdate();
+		// Consolidate WiFi operations to avoid redundant enable/disable cycles
+		if (enableWifi()) {
+			ntpUpdate(true);  // WiFi already enabled
+			getWeather(true); // WiFi already enabled
+			disableWifi();
+		} else {
+			// WiFi failed - still try to continue with default time
+			time(&lastNtpUpdate);
+			time(&lastWeatherUpdate);
+		}
 		time(&waketime);
 		getClock();
 		setClock();
-		getWeather();
 		setWeather();
 		redraw();
 		firstRun = false;

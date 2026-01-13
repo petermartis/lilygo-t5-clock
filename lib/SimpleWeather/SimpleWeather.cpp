@@ -4,16 +4,37 @@
 #include <ArduinoJson.h>
 #include "SimpleWeather.h"
 
-OpenWeather::OpenWeather(String Key, float lat, float longi){
-	_url = "/data/3.0/onecall?lat=" + String(lat) + "&lon=" + String(longi) + "&appid=" + Key +"&units=metric&exclude=minutely,hourly,daily,alerts";
+// Icon mapping lookup table for O(1) access
+struct IconMapping {
+	const char* owm;
+	const char* meteocons;
+};
+
+static const IconMapping ICON_MAP[] = {
+	{"01d", "B"}, {"01n", "C"},
+	{"02d", "H"}, {"02n", "4"},
+	{"03d", "N"}, {"03n", "5"},
+	{"04d", "Y"}, {"04n", "Y"},
+	{"09d", "Q"}, {"09n", "7"},
+	{"10d", "R"}, {"10n", "8"},
+	{"11d", "O"}, {"11n", "6"},
+	{"13d", "W"}, {"13n", "#"},
+	{"50d", "M"}, {"50n", "M"},
+	{nullptr, nullptr}
+};
+
+OpenWeather::OpenWeather(const char* Key, float lat, float longi) {
+	snprintf(_url, sizeof(_url),
+		"/data/3.0/onecall?lat=%.6f&lon=%.6f&appid=%s&units=metric&exclude=minutely,hourly,daily,alerts",
+		lat, longi, Key);
 }
 
-bool OpenWeather::updateStatus(weatherData *w){
+bool OpenWeather::updateStatus(weatherData *w) {
 
 	const char *openweather = "api.openweathermap.org";
 	const int httpsPort = 443;
 	WiFiClientSecure httpsClient;
-	const size_t capacity = 1024;
+	const size_t capacity = 4096;  // OneCall API responses can be 2-4KB
 	httpsClient.setInsecure();
 	httpsClient.setTimeout(15000);
 
@@ -26,27 +47,38 @@ bool OpenWeather::updateStatus(weatherData *w){
 		return false;
 	}
 
-	httpsClient.print(String("GET ") + _url + " HTTP/1.1\r\n" + "Host: " + openweather + "\r\n" + "Connection: close\r\n\r\n");
+	// Build HTTP request using fixed buffer - avoids String heap fragmentation
+	char request[384];
+	snprintf(request, sizeof(request),
+		"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
+		_url, openweather);
+	httpsClient.print(request);
 
+	// Skip headers without storing them - avoids repeated String allocation
 	while (httpsClient.connected()) {
-		_Response = httpsClient.readStringUntil('\n');
-		if (_Response == "\r") {
+		String line = httpsClient.readStringUntil('\n');
+		if (line == "\r") {
 			break;
 		}
 	}
 
+	// Read body - this allocation is necessary for JSON parsing
+	String response;
 	while (httpsClient.connected()) {
-		_Response = httpsClient.readString();
+		response = httpsClient.readString();
 	}
+
 	DynamicJsonDocument doc(capacity);
-	DeserializationError err = deserializeJson(doc,_Response);
+	DeserializationError err = deserializeJson(doc, response);
 	if (err.code() != DeserializationError::Ok) {
 		return false;
 	}
 
 	if (!doc.containsKey("current")) return false;
-	if (!doc["current"].containsKey("weather") && doc["current"]["weather"].size() > 0) {
-		w->icon = doc["weather"][0]["icon"].as<String>();
+	if (doc["current"].containsKey("weather") && doc["current"]["weather"].size() > 0) {
+		const char* iconStr = doc["current"]["weather"][0]["icon"] | "";
+		strncpy(w->icon, iconStr, sizeof(w->icon) - 1);
+		w->icon[sizeof(w->icon) - 1] = '\0';
 	}
 	if (doc["current"].containsKey("temp")) {
 		w->current_Temp = doc["current"]["temp"].as<float>();
@@ -68,72 +100,25 @@ bool OpenWeather::updateStatus(weatherData *w){
 
 }
 
-String OpenWeather::getResponse() {
-	return _Response;
+// Returns static string - no heap allocation
+const char* OpenWeather::getWindDirection(int deg) {
+    if (deg >= 337 || deg < 23) return "N";
+    if (deg < 68) return "NE";
+    if (deg < 113) return "E";
+    if (deg < 158) return "SE";
+    if (deg < 203) return "S";
+    if (deg < 248) return "SW";
+    if (deg < 293) return "W";
+    return "NW";
 }
 
-// I'm not hitting the high seas in my schooner anytime soon, so this is precise enough
-String OpenWeather::getWindDirection(int deg) {
-    String ret = "";
-    if (deg >= 337.5 || deg < 22.5) {
-        ret = "N";
-    } else if (deg < 67.5) {
-        ret = "NE";
-    } else if (deg < 112.5) {
-        ret = "E";
-    } else if (deg < 157.5) {
-        ret = "SE";
-    } else if (deg < 202.5) {
-        ret = "S";
-    } else if (deg < 247.5) {
-        ret = "SW";
-    } else if (deg < 292.5) {
-        ret = "W";
-    } else if (deg < 337.5) {
-        ret = "NW";
-    }
-    return ret;
-}
-
-// Map OWM's suggested icons to Meteocons
-String OpenWeather::getIcon(String i) {
-	String icon = "B";
-	if (i == "01d") {
-		icon = "B";
-	} else if (i == "01n") {
-		icon = "C";
-	} else if (i == "02d") {
-		icon = "H";
-	} else if (i == "02n") {
-		icon = "4";
-	} else if (i == "03d") {
-		icon = "N";
-	} else if (i == "03n") {
-		icon = "5";
-	} else if (i == "04d") {
-		icon = "Y";
-	} else if (i == "04n") {
-		icon = "Y";
-	} else if (i == "09d") {
-		icon = "Q";
-	} else if (i == "09n") {
-		icon = "7";
-	} else if (i == "10d") {
-		icon = "R";
-	} else if (i == "10n") {
-		icon = "8";
-	} else if (i == "11d") {
-		icon = "O";
-	} else if (i == "11n") {
-		icon = "6";
-	} else if (i == "13d") {
-		icon = "W";
-	} else if (i == "13n") {
-		icon = "#";
-	} else if (i == "50d") {
-		icon = "M";
-	} else if (i == "50n") {
-		icon = "M";
+// O(1) lookup using table - returns static string
+const char* OpenWeather::getIcon(const char* i) {
+	if (!i || !*i) return "B";  // Default
+	for (const IconMapping* m = ICON_MAP; m->owm != nullptr; m++) {
+		if (strcmp(m->owm, i) == 0) {
+			return m->meteocons;
+		}
 	}
-	return icon;
+	return "B";  // Default icon
 }

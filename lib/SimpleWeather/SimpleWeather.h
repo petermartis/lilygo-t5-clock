@@ -11,7 +11,7 @@
 #include <WiFi.h>
 
 struct weatherData {
-	String icon;
+	char icon[5];
 	int humidity;
 	int wind_direction;
 	float current_Temp;
@@ -21,15 +21,12 @@ struct weatherData {
 
 class OpenWeather {
 	public:
-		OpenWeather(String Key, String City); 
-		OpenWeather(String Key, float lat, float longi);
+		OpenWeather(const char* Key, float lat, float longi);
 		bool updateStatus(weatherData *w);
-		String getResponse();
-		String getWindDirection(int deg);
-		String getIcon(String i);
+		const char* getWindDirection(int deg);
+		const char* getIcon(const char* i);
 	private:
-		String _Response;
-		String _url;
+		char _url[256];
 };
 
 #endif
