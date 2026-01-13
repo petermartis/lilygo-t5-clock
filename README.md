@@ -34,9 +34,28 @@ Create a file at `src/config.h` and populate it with the following:
 #define NTP_INTERVAL	 3600 // Seconds between NTP updates
 #define WEATHER_INTERVAL 1800 // Seconds between weather updates
 #define REDRAW_INTERVAL  3600 // Seconds between screen redraws
+
+// Optional: MQTT configuration for custom messages
+// Uncomment and configure to enable MQTT message display
+// #define MQTT_SERVER "192.168.1.100"
+// #define MQTT_PORT 1883
+// #define MQTT_TOPIC "epd-clock/message"
+// #define MQTT_USER "username"      // Optional: for authenticated brokers
+// #define MQTT_PASS "password"      // Optional: for authenticated brokers
 ```
 
 Customize as needed.
+
+### MQTT Message Display
+
+The clock includes an optional MQTT listener that displays custom messages at the bottom of the screen. This is useful for Home Assistant notifications, IoT alerts, or any custom messaging.
+
+To enable MQTT:
+1. Uncomment the `MQTT_SERVER`, `MQTT_PORT`, and `MQTT_TOPIC` defines in `config.h`
+2. Configure authentication if your broker requires it (`MQTT_USER` and `MQTT_PASS`)
+3. Publish messages to the configured topic (max 127 characters)
+
+The message area is 25 pixels tall and spans the full width of the display. Messages are centered and persist across sleep cycles until updated.
 
 ### Configuration Notes
 

@@ -19,6 +19,7 @@
 #include "WiFi.h"
 #include "WiFiUdp.h"
 #include <NTPClient.h>
+#include <PubSubClient.h>
 #include "SimpleWeather.h"
 #include "batt_100.h"
 #include "batt_75.h"
@@ -32,14 +33,16 @@
 #define EPD_HEIGHT 540
 #define H_MARGIN 20
 #define V_MARGIN 20
+#define MQTT_MSG_HEIGHT 25
 
 const uint CLOCK_X = H_MARGIN;
 const uint CLOCK_Y = 175;
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
 const uint DATE_Y1 = 105;
 const uint DATE_Y2 = CLOCK_Y;
+// Battery moved up to make room for MQTT message area
 const uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width;
-const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height;
+const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height - MQTT_MSG_HEIGHT - 10;
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
 const uint START_TIME_Y = EPD_HEIGHT - V_MARGIN;
 const uint WICON_X = H_MARGIN;
@@ -54,6 +57,9 @@ const uint HUMID_X = WIND_X;
 const uint HUMID_Y = 400;
 const uint WUPDATE_X = WIND_X;
 const uint WUPDATE_Y = 450;
+// MQTT message area - full width at bottom
+const uint MQTT_X = EPD_WIDTH / 2;  // Center aligned
+const uint MQTT_Y = EPD_HEIGHT - 5; // Near bottom with small margin
 
 /**
  * WICON_AREA is used when erasing the weather icon prior to redrawing.
@@ -76,6 +82,14 @@ const Rect_t BATT_AREA = {
 	.height = batt_100_height,
 };
 
+// MQTT message area - full width, 25px tall at bottom
+const Rect_t MQTT_AREA = {
+	.x = H_MARGIN,
+	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 5,
+	.width = EPD_WIDTH - (2 * H_MARGIN),
+	.height = MQTT_MSG_HEIGHT + 5,
+};
+
 bool _drawDate = false;
 bool _drawWeather = false;
 bool _drawWicon = false;
@@ -84,6 +98,7 @@ bool _drawFtemp = false;
 bool _drawWind = false;
 bool _drawHumidity = false;
 bool _drawVoltage = false;
+bool _drawMqttMsg = false;
 char _tod[10];
 char _dow[20];
 char _mdy[50];
@@ -93,6 +108,7 @@ char _wFeels[20];
 char _wWind[25];
 char _wHumidity[20];
 char _wUpdated[20];
+char _mqttMsg[128];
 uint8_t _batt = 0;
 time_t waketime;
 enum alignment { LEFT, RIGHT, CENTER };
@@ -117,12 +133,27 @@ RTC_DATA_ATTR time_t lastNtpUpdate;
 RTC_DATA_ATTR time_t lastVoltageUpdate;
 RTC_DATA_ATTR time_t lastWeatherUpdate;
 RTC_DATA_ATTR time_t lastRedraw;
+RTC_DATA_ATTR char mqttMsg[128];  // Persisted MQTT message
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
 GFXfont currentFont;
 weatherData w;
 OpenWeather weather(OWM_KEY, OWM_LAT, OWM_LON);
+
+// MQTT client
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+bool mqttMessageReceived = false;
+
+// MQTT callback - called when a message arrives
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+	// Truncate if message is too long
+	unsigned int copyLen = (length < sizeof(_mqttMsg) - 1) ? length : sizeof(_mqttMsg) - 1;
+	memcpy(_mqttMsg, payload, copyLen);
+	_mqttMsg[copyLen] = '\0';
+	mqttMessageReceived = true;
+}
 
 int setUnixtime(int32_t unixtime) {
 	timeval epoch = {unixtime, 0};
@@ -255,6 +286,29 @@ void drawVoltage() {
 	redrawVoltage();
 }
 
+// MQTT message display functions
+void redrawMqttMsg() {
+	if (mqttMsg[0] != '\0') {
+		setFont(NK5715B);
+		drawString(MQTT_X, MQTT_Y, mqttMsg, CENTER);
+	}
+}
+
+void drawMqttMsg() {
+	epd_clear_area(MQTT_AREA);
+	if (_mqttMsg[0] != '\0') {
+		setFont(NK5715B);
+		drawString(MQTT_X, MQTT_Y, _mqttMsg, CENTER);
+	}
+}
+
+void setMqttMsg() {
+	if (_drawMqttMsg) {
+		strncpy(mqttMsg, _mqttMsg, sizeof(mqttMsg) - 1);
+		mqttMsg[sizeof(mqttMsg) - 1] = '\0';
+	}
+}
+
 #define WIFI_TIMEOUT_MS 15000
 
 bool enableWifi() {
@@ -276,6 +330,59 @@ void disableWifi() {
 	WiFi.disconnect();
 	WiFi.mode(WIFI_OFF);
 }
+
+// Check MQTT for new messages - requires WiFi to be connected
+#ifdef MQTT_SERVER
+void checkMqtt(bool wifiAlreadyEnabled = false) {
+	if (!wifiAlreadyEnabled) {
+		if (!enableWifi()) {
+			return;
+		}
+	}
+
+	mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+	mqttClient.setCallback(mqttCallback);
+
+	// Try to connect with timeout
+	unsigned long startAttempt = millis();
+	while (!mqttClient.connected() && (millis() - startAttempt < 5000)) {
+		#ifdef MQTT_USER
+		mqttClient.connect("EPD-Clock", MQTT_USER, MQTT_PASS);
+		#else
+		mqttClient.connect("EPD-Clock");
+		#endif
+		if (!mqttClient.connected()) {
+			delay(250);
+		}
+	}
+
+	if (mqttClient.connected()) {
+		mqttClient.subscribe(MQTT_TOPIC);
+
+		// Wait briefly for any retained message or new message
+		unsigned long waitStart = millis();
+		while (millis() - waitStart < 2000) {
+			mqttClient.loop();
+			if (mqttMessageReceived) {
+				break;
+			}
+			delay(50);
+		}
+
+		mqttClient.disconnect();
+	}
+
+	// Check if message changed
+	if (mqttMessageReceived && strcmp(mqttMsg, _mqttMsg) != 0) {
+		_drawMqttMsg = true;
+	}
+	mqttMessageReceived = false;
+
+	if (!wifiAlreadyEnabled) {
+		disableWifi();
+	}
+}
+#endif
 
 bool ntpUpdate(bool wifiAlreadyEnabled = false) {
 
@@ -407,6 +514,7 @@ void redraw() {
 	redrawWeather();
 	if (firstRun) getVoltage();
 	redrawVoltage();
+	redrawMqttMsg();
 	epd_poweroff_all();
 	time(&lastRedraw);
 }
@@ -420,6 +528,7 @@ void partialRedraw() {
 		getVoltage();
 		if (_drawVoltage) drawVoltage();
 	}
+	if (_drawMqttMsg) drawMqttMsg();
 	epd_poweroff_all();
 }
 
@@ -434,6 +543,9 @@ void setup() {
 		if (enableWifi()) {
 			ntpUpdate(true);  // WiFi already enabled
 			getWeather(true); // WiFi already enabled
+			#ifdef MQTT_SERVER
+			checkMqtt(true);  // WiFi already enabled
+			#endif
 			disableWifi();
 		} else {
 			// WiFi failed - still try to continue with default time
@@ -444,20 +556,40 @@ void setup() {
 		getClock();
 		setClock();
 		setWeather();
+		setMqttMsg();
 		redraw();
 		firstRun = false;
 	} else {
 		time(&waketime);
 		bool r = waketime - lastRedraw >= REDRAW_INTERVAL;
-		if (waketime - lastNtpUpdate >= NTP_INTERVAL) {
-			ntpUpdate();
-			time(&waketime);
+		// Consolidate WiFi operations when multiple updates are needed
+		bool needNtp = (waketime - lastNtpUpdate >= NTP_INTERVAL);
+		bool needWeather = (waketime - lastWeatherUpdate >= WEATHER_INTERVAL);
+		#ifdef MQTT_SERVER
+		bool needMqtt = true;  // Check MQTT every wake cycle
+		#else
+		bool needMqtt = false;
+		#endif
+
+		if (needNtp || needWeather || needMqtt) {
+			if (enableWifi()) {
+				if (needNtp) {
+					ntpUpdate(true);
+					time(&waketime);
+				}
+				if (needWeather) getWeather(true);
+				#ifdef MQTT_SERVER
+				if (needMqtt) checkMqtt(true);
+				#endif
+				disableWifi();
+			}
 		}
-		if (waketime - lastWeatherUpdate >= WEATHER_INTERVAL) getWeather();
+
 		getClock();
 		if (!r) partialRedraw();
 		setClock();
 		if (_drawWeather) setWeather();
+		if (_drawMqttMsg) setMqttMsg();
 		if (r) redraw();
 	}
 
