@@ -286,15 +286,41 @@ void drawVoltage() {
 	redrawVoltage();
 }
 
-// MQTT message display functions
-void redrawMqttMsg() {
+// Status/Message display functions (used for MQTT messages and error/warning display)
+void setStatusMsg(const char* msg) {
+	strncpy(_mqttMsg, msg, sizeof(_mqttMsg) - 1);
+	_mqttMsg[sizeof(_mqttMsg) - 1] = '\0';
+	if (strcmp(mqttMsg, _mqttMsg) != 0) {
+		_drawMqttMsg = true;
+	}
+}
+
+void setStatusMsgWithTime(const char* prefix) {
+	struct tm now;
+	getLocalTime(&now);
+	char timeStr[10];
+	strftime(timeStr, sizeof(timeStr), "%H:%M", &now);
+	snprintf(_mqttMsg, sizeof(_mqttMsg), "%s [%s]", prefix, timeStr);
+	if (strcmp(mqttMsg, _mqttMsg) != 0) {
+		_drawMqttMsg = true;
+	}
+}
+
+void clearStatusMsg() {
+	_mqttMsg[0] = '\0';
+	if (mqttMsg[0] != '\0') {
+		_drawMqttMsg = true;
+	}
+}
+
+void redrawStatusMsg() {
 	if (mqttMsg[0] != '\0') {
 		setFont(NK5715B);
 		drawString(MQTT_X, MQTT_Y, mqttMsg, CENTER);
 	}
 }
 
-void drawMqttMsg() {
+void drawStatusMsg() {
 	epd_clear_area(MQTT_AREA);
 	if (_mqttMsg[0] != '\0') {
 		setFont(NK5715B);
@@ -302,7 +328,7 @@ void drawMqttMsg() {
 	}
 }
 
-void setMqttMsg() {
+void saveStatusMsg() {
 	if (_drawMqttMsg) {
 		strncpy(mqttMsg, _mqttMsg, sizeof(mqttMsg) - 1);
 		mqttMsg[sizeof(mqttMsg) - 1] = '\0';
@@ -336,6 +362,7 @@ void disableWifi() {
 void checkMqtt(bool wifiAlreadyEnabled = false) {
 	if (!wifiAlreadyEnabled) {
 		if (!enableWifi()) {
+			setStatusMsgWithTime("! WiFi timeout (MQTT)");
 			return;
 		}
 	}
@@ -370,9 +397,12 @@ void checkMqtt(bool wifiAlreadyEnabled = false) {
 		}
 
 		mqttClient.disconnect();
+	} else {
+		// MQTT broker unreachable
+		setStatusMsgWithTime("! MQTT broker unreachable");
 	}
 
-	// Check if message changed
+	// Check if MQTT message received and changed
 	if (mqttMessageReceived && strcmp(mqttMsg, _mqttMsg) != 0) {
 		_drawMqttMsg = true;
 	}
@@ -388,6 +418,7 @@ bool ntpUpdate(bool wifiAlreadyEnabled = false) {
 
 	if (!wifiAlreadyEnabled) {
 		if (!enableWifi()) {
+			setStatusMsgWithTime("! WiFi timeout (NTP)");
 			time(&lastNtpUpdate);
 			return false;
 		}
@@ -453,6 +484,7 @@ void getWeather(bool wifiAlreadyEnabled = false) {
 
 	if (!wifiAlreadyEnabled) {
 		if (!enableWifi()) {
+			setStatusMsgWithTime("! WiFi timeout (weather)");
 			time(&lastWeatherUpdate);
 			return;
 		}
@@ -491,10 +523,11 @@ void getWeather(bool wifiAlreadyEnabled = false) {
 
 	} else {
 
+		setStatusMsgWithTime("! Weather API error");
 		strftime(_wUpdated, 20, "! Updated: %H:%M", &now);
 
 	}
-	
+
 }
 
 void setWeather() {
@@ -514,7 +547,7 @@ void redraw() {
 	redrawWeather();
 	if (firstRun) getVoltage();
 	redrawVoltage();
-	redrawMqttMsg();
+	redrawStatusMsg();
 	epd_poweroff_all();
 	time(&lastRedraw);
 }
@@ -528,7 +561,7 @@ void partialRedraw() {
 		getVoltage();
 		if (_drawVoltage) drawVoltage();
 	}
-	if (_drawMqttMsg) drawMqttMsg();
+	if (_drawMqttMsg) drawStatusMsg();
 	epd_poweroff_all();
 }
 
@@ -541,7 +574,9 @@ void setup() {
 	if (firstRun) {
 		// Consolidate WiFi operations to avoid redundant enable/disable cycles
 		if (enableWifi()) {
-			ntpUpdate(true);  // WiFi already enabled
+			if (!ntpUpdate(true)) {
+				setStatusMsgWithTime("! NTP sync failed");
+			}
 			getWeather(true); // WiFi already enabled
 			#ifdef MQTT_SERVER
 			checkMqtt(true);  // WiFi already enabled
@@ -549,6 +584,7 @@ void setup() {
 			disableWifi();
 		} else {
 			// WiFi failed - still try to continue with default time
+			setStatusMsgWithTime("! WiFi connection timeout");
 			time(&lastNtpUpdate);
 			time(&lastWeatherUpdate);
 		}
@@ -556,7 +592,7 @@ void setup() {
 		getClock();
 		setClock();
 		setWeather();
-		setMqttMsg();
+		saveStatusMsg();
 		redraw();
 		firstRun = false;
 	} else {
@@ -574,7 +610,9 @@ void setup() {
 		if (needNtp || needWeather || needMqtt) {
 			if (enableWifi()) {
 				if (needNtp) {
-					ntpUpdate(true);
+					if (!ntpUpdate(true)) {
+						setStatusMsgWithTime("! NTP sync failed");
+					}
 					time(&waketime);
 				}
 				if (needWeather) getWeather(true);
@@ -582,6 +620,8 @@ void setup() {
 				if (needMqtt) checkMqtt(true);
 				#endif
 				disableWifi();
+			} else {
+				setStatusMsgWithTime("! WiFi connection timeout");
 			}
 		}
 
@@ -589,7 +629,7 @@ void setup() {
 		if (!r) partialRedraw();
 		setClock();
 		if (_drawWeather) setWeather();
-		if (_drawMqttMsg) setMqttMsg();
+		if (_drawMqttMsg) saveStatusMsg();
 		if (r) redraw();
 	}
 
