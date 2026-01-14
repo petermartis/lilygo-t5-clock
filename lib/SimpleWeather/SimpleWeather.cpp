@@ -27,9 +27,10 @@ OpenWeather::OpenWeather(const char* Key, float lat, float longi) {
 	snprintf(_url, sizeof(_url),
 		"/data/3.0/onecall?lat=%.6f&lon=%.6f&appid=%s&units=metric&exclude=minutely,hourly,daily,alerts",
 		lat, longi, Key);
+	_errorDetail[0] = '\0';
 }
 
-bool OpenWeather::updateStatus(weatherData *w) {
+WeatherError OpenWeather::updateStatus(weatherData *w) {
 
 	const char *openweather = "api.openweathermap.org";
 	const int httpsPort = 443;
@@ -38,13 +39,15 @@ bool OpenWeather::updateStatus(weatherData *w) {
 	httpsClient.setInsecure();
 	httpsClient.setTimeout(15000);
 
+	// Try to connect
 	int r = 0;
 	while ((!httpsClient.connect(openweather, httpsPort)) && (r < 4)) {
 		delay(100);
 		r++;
 	}
 	if (r > 3) {
-		return false;
+		snprintf(_errorDetail, sizeof(_errorDetail), "Connect failed after %d retries", r);
+		return WEATHER_ERR_CONNECTION;
 	}
 
 	// Build HTTP request using fixed buffer - avoids String heap fragmentation
@@ -54,7 +57,17 @@ bool OpenWeather::updateStatus(weatherData *w) {
 		_url, openweather);
 	httpsClient.print(request);
 
-	// Skip headers without storing them - avoids repeated String allocation
+	// Read and check HTTP status line
+	String statusLine = httpsClient.readStringUntil('\n');
+	int httpCode = 0;
+	if (statusLine.startsWith("HTTP/")) {
+		int spaceIndex = statusLine.indexOf(' ');
+		if (spaceIndex > 0) {
+			httpCode = statusLine.substring(spaceIndex + 1, spaceIndex + 4).toInt();
+		}
+	}
+
+	// Skip remaining headers
 	while (httpsClient.connected()) {
 		String line = httpsClient.readStringUntil('\n');
 		if (line == "\r") {
@@ -62,19 +75,54 @@ bool OpenWeather::updateStatus(weatherData *w) {
 		}
 	}
 
+	// Check HTTP status code
+	if (httpCode != 200) {
+		snprintf(_errorDetail, sizeof(_errorDetail), "HTTP %d", httpCode);
+		// Read a bit of the error response for context
+		if (httpsClient.connected()) {
+			String errBody = httpsClient.readStringUntil('\n');
+			// Truncate if too long
+			if (errBody.length() > 30) {
+				errBody = errBody.substring(0, 30) + "...";
+			}
+		}
+		return WEATHER_ERR_API_ERROR;
+	}
+
 	// Read body - this allocation is necessary for JSON parsing
 	String response;
-	while (httpsClient.connected()) {
-		response = httpsClient.readString();
+	unsigned long readStart = millis();
+	while (httpsClient.connected() && (millis() - readStart < 10000)) {
+		if (httpsClient.available()) {
+			response += httpsClient.readString();
+		}
+	}
+
+	if (response.length() == 0) {
+		snprintf(_errorDetail, sizeof(_errorDetail), "Empty response");
+		return WEATHER_ERR_TIMEOUT;
 	}
 
 	DynamicJsonDocument doc(capacity);
 	DeserializationError err = deserializeJson(doc, response);
 	if (err.code() != DeserializationError::Ok) {
-		return false;
+		snprintf(_errorDetail, sizeof(_errorDetail), "JSON: %s (len=%d)", err.c_str(), response.length());
+		return WEATHER_ERR_JSON_PARSE;
 	}
 
-	if (!doc.containsKey("current")) return false;
+	// Check for API error response
+	if (doc.containsKey("cod") && doc.containsKey("message")) {
+		const char* msg = doc["message"] | "unknown";
+		snprintf(_errorDetail, sizeof(_errorDetail), "API: %s", msg);
+		return WEATHER_ERR_API_ERROR;
+	}
+
+	if (!doc.containsKey("current")) {
+		snprintf(_errorDetail, sizeof(_errorDetail), "No 'current' in response");
+		return WEATHER_ERR_NO_DATA;
+	}
+
+	// Parse weather data
 	if (doc["current"].containsKey("weather") && doc["current"]["weather"].size() > 0) {
 		const char* iconStr = doc["current"]["weather"][0]["icon"] | "";
 		strncpy(w->icon, iconStr, sizeof(w->icon) - 1);
@@ -96,8 +144,8 @@ bool OpenWeather::updateStatus(weatherData *w) {
 		w->wind_direction = doc["current"]["wind_deg"].as<int>();
 	}
 
-	return true;
-
+	_errorDetail[0] = '\0';
+	return WEATHER_OK;
 }
 
 // Returns static string - no heap allocation

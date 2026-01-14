@@ -10,6 +10,16 @@
 #include "Arduino.h"
 #include <WiFi.h>
 
+// Error codes for weather API
+enum WeatherError {
+	WEATHER_OK = 0,
+	WEATHER_ERR_CONNECTION = 1,
+	WEATHER_ERR_TIMEOUT = 2,
+	WEATHER_ERR_JSON_PARSE = 3,
+	WEATHER_ERR_NO_DATA = 4,
+	WEATHER_ERR_API_ERROR = 5
+};
+
 struct weatherData {
 	char icon[5];
 	int humidity;
@@ -22,11 +32,13 @@ struct weatherData {
 class OpenWeather {
 	public:
 		OpenWeather(const char* Key, float lat, float longi);
-		bool updateStatus(weatherData *w);
+		WeatherError updateStatus(weatherData *w);
 		const char* getWindDirection(int deg);
 		const char* getIcon(const char* i);
+		const char* getLastErrorDetail() { return _errorDetail; }
 	private:
 		char _url[256];
+		char _errorDetail[64];
 };
 
 #endif

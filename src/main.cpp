@@ -489,7 +489,7 @@ void getWeather(bool wifiAlreadyEnabled = false) {
 			return;
 		}
 	}
-	bool updated = weather.updateStatus(&w);
+	WeatherError err = weather.updateStatus(&w);
 	if (!wifiAlreadyEnabled) {
 		disableWifi();
 	}
@@ -498,7 +498,7 @@ void getWeather(bool wifiAlreadyEnabled = false) {
 	struct tm now;
 	getLocalTime(&now);
 
-	if (updated) {
+	if (err == WEATHER_OK) {
 
 		_drawWeather = true;
 
@@ -522,10 +522,31 @@ void getWeather(bool wifiAlreadyEnabled = false) {
 		strftime(_wUpdated, 20, "Updated: %H:%M", &now);
 
 	} else {
-
-		setStatusMsgWithTime("! Weather API error");
+		// Show specific error with details
+		char errMsg[128];
+		const char* errDetail = weather.getLastErrorDetail();
+		switch (err) {
+			case WEATHER_ERR_CONNECTION:
+				snprintf(errMsg, sizeof(errMsg), "! Weather: connection failed");
+				break;
+			case WEATHER_ERR_TIMEOUT:
+				snprintf(errMsg, sizeof(errMsg), "! Weather: timeout");
+				break;
+			case WEATHER_ERR_JSON_PARSE:
+				snprintf(errMsg, sizeof(errMsg), "! Weather: %s", errDetail);
+				break;
+			case WEATHER_ERR_NO_DATA:
+				snprintf(errMsg, sizeof(errMsg), "! Weather: %s", errDetail);
+				break;
+			case WEATHER_ERR_API_ERROR:
+				snprintf(errMsg, sizeof(errMsg), "! Weather: %s", errDetail);
+				break;
+			default:
+				snprintf(errMsg, sizeof(errMsg), "! Weather: unknown error");
+				break;
+		}
+		setStatusMsg(errMsg);
 		strftime(_wUpdated, 20, "! Updated: %H:%M", &now);
-
 	}
 
 }
