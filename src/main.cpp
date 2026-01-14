@@ -40,9 +40,9 @@ const uint CLOCK_Y = 175;
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
 const uint DATE_Y1 = 105;
 const uint DATE_Y2 = CLOCK_Y;
-// Battery at bottom right
-const uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width;
-const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height;
+// Battery at bottom right corner (pushed right and down to avoid overlap)
+const uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width + 5;
+const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height + 5;
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
 const uint START_TIME_Y = EPD_HEIGHT - V_MARGIN;
 // Weather section moved up by 50px to fill gap below time/date
@@ -60,7 +60,7 @@ const uint WUPDATE_X = WIND_X;
 const uint WUPDATE_Y = 400;
 // MQTT message area - full width, moved up from edge
 const uint MQTT_X = EPD_WIDTH / 2;  // Center aligned
-const uint MQTT_Y = EPD_HEIGHT - 15; // Moved up from edge
+const uint MQTT_Y = EPD_HEIGHT - 25; // Moved up more from edge
 
 /**
  * WICON_AREA is used when erasing the weather icon prior to redrawing.
@@ -83,11 +83,11 @@ const Rect_t BATT_AREA = {
 	.height = batt_100_height,
 };
 
-// MQTT message area - full width at bottom
+// MQTT message area - limited width to avoid battery icon overlap
 const Rect_t MQTT_AREA = {
 	.x = H_MARGIN,
-	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 15,
-	.width = EPD_WIDTH - (2 * H_MARGIN),
+	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 25,
+	.width = EPD_WIDTH - (2 * H_MARGIN) - batt_100_width - 10,  // Leave space for battery
 	.height = MQTT_MSG_HEIGHT + 10,
 };
 
@@ -202,10 +202,11 @@ void drawString(int x, int y, const char* text, const char* old_text, alignment 
 }
 
 void redrawClock() {
-	setFont(NK5772B);	
+	setFont(NK5772B);
 	drawString(CLOCK_X, CLOCK_Y, tod, LEFT);
 	setFont(NK5724B);
 	drawString(DATE_X, DATE_Y1, dow, RIGHT);
+	setFont(NK5715B);  // Smaller font for date
 	drawString(DATE_X, DATE_Y2, mdy, RIGHT);
 }
 
@@ -215,6 +216,7 @@ void drawClock() {
 	if (_drawDate) {
 		setFont(NK5724B);
 		drawString(DATE_X, DATE_Y1, _dow, dow, RIGHT);
+		setFont(NK5715B);  // Smaller font for date
 		drawString(DATE_X, DATE_Y2, _mdy, mdy, RIGHT);
 	}
 }
@@ -227,7 +229,7 @@ void getClock() {
 		_drawDate = true;
 		dayOfWeek = now.tm_wday;
 		strftime(_dow, 20, "%A", &now);
-		strftime(_mdy, 50, "%b %d %Y", &now);
+		strftime(_mdy, 50, "%B %d", &now);  // Full month name, no year
 	}
 }
 
