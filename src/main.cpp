@@ -58,8 +58,9 @@ const uint HUMID_X = WIND_X;
 const uint HUMID_Y = 335;
 const uint WUPDATE_X = WIND_X;
 const uint WUPDATE_Y = 385;
-// MQTT message area - center aligned, moved up 10px
-const uint MQTT_X = EPD_WIDTH / 2;  // Center aligned
+// MQTT message area - center within available space (excluding battery area)
+const uint MQTT_AREA_WIDTH = EPD_WIDTH - (2 * H_MARGIN) - batt_100_width - 30;
+const uint MQTT_X = H_MARGIN + (MQTT_AREA_WIDTH / 2);  // Center within available area
 const uint MQTT_Y = EPD_HEIGHT - 35; // Moved up 10px
 
 /**
@@ -87,7 +88,7 @@ const Rect_t BATT_AREA = {
 const Rect_t MQTT_AREA = {
 	.x = H_MARGIN,
 	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 35,  // Moved up 10px
-	.width = EPD_WIDTH - (2 * H_MARGIN) - batt_100_width - 20,  // Leave more space for battery
+	.width = (int32_t)MQTT_AREA_WIDTH,
 	.height = MQTT_MSG_HEIGHT + 10,
 };
 
@@ -243,23 +244,32 @@ void setClock() {
 }
 
 void getVoltage() {
-	// Calibrate ADC only once - cache result in RTC memory
+	// Initialize ADC for battery reading (LilyGo T5-4.7 specific)
 	if (!adcCalibrated) {
+		// Configure ADC
+		analogReadResolution(12);  // 12-bit resolution (0-4095)
+		analogSetAttenuation(ADC_11db);  // For full voltage range
+
+		// Calibrate using eFuse vref if available
 		esp_adc_cal_characteristics_t adc_chars;
-		esp_adc_cal_value_t val_type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
-		if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) vref = adc_chars.vref;
+		esp_adc_cal_value_t val_type = esp_adc_cal_characterize(
+			ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
+		if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) {
+			vref = adc_chars.vref;
+		}
 		adcCalibrated = true;
 	}
 
-	// Take multiple samples and average for stability (LilyGo T5 recommendation)
+	// Take multiple samples and average for stability
 	uint32_t sum = 0;
 	for (int i = 0; i < 10; i++) {
 		sum += analogRead(BATT_PIN);
-		delay(2);
+		delay(5);  // Slightly longer delay for ADC settling
 	}
 	uint16_t v = sum / 10;
 
-	// LilyGo T5-4.7 uses 2:1 voltage divider (100K/100K)
+	// LilyGo T5-4.7: Battery through 2:1 voltage divider
+	// Formula: voltage = (ADC_reading / 4095) * 3.3V * 2 * (vref_correction)
 	float _voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
 
 	// Only update if voltage changed significantly (0.05V threshold to avoid flicker)
