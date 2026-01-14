@@ -133,6 +133,7 @@ RTC_DATA_ATTR char wUpdated[20];
 RTC_DATA_ATTR time_t lastNtpUpdate;
 RTC_DATA_ATTR time_t lastVoltageUpdate;
 RTC_DATA_ATTR time_t lastWeatherUpdate;
+RTC_DATA_ATTR time_t lastMqttUpdate;  // Track MQTT check timing
 RTC_DATA_ATTR time_t lastRedraw;
 RTC_DATA_ATTR char mqttMsg[128];  // Persisted MQTT message
 
@@ -353,26 +354,29 @@ void saveStatusMsg() {
 	}
 }
 
-#define WIFI_TIMEOUT_MS 15000
+#define WIFI_TIMEOUT_MS 10000  // Reduced from 15s
 
 bool enableWifi() {
+    // Use persistent mode for faster reconnection (remembers AP)
+    WiFi.persistent(true);
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    delay(100);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
+
     unsigned long startAttempt = millis();
     while (WiFi.status() != WL_CONNECTED) {
         if (millis() - startAttempt >= WIFI_TIMEOUT_MS) {
-            return false;  // Timeout - prevent infinite loop
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+            return false;
         }
-        delay(250);  // Finer polling interval
+        delay(100);  // Faster polling
     }
     return true;
 }
 
 void disableWifi() {
-	WiFi.disconnect();
-	WiFi.mode(WIFI_OFF);
+    WiFi.disconnect(true);  // true = turn off WiFi station mode
+    WiFi.mode(WIFI_OFF);
 }
 
 // Check MQTT for new messages - requires WiFi to be connected
@@ -388,30 +392,31 @@ void checkMqtt(bool wifiAlreadyEnabled = false) {
 	mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
 	mqttClient.setCallback(mqttCallback);
 
-	// Try to connect with timeout
+	// Try to connect with shorter timeout (3s instead of 5s)
 	unsigned long startAttempt = millis();
-	while (!mqttClient.connected() && (millis() - startAttempt < 5000)) {
+	while (!mqttClient.connected() && (millis() - startAttempt < 3000)) {
 		#ifdef MQTT_USER
 		mqttClient.connect("EPD-Clock", MQTT_USER, MQTT_PASS);
 		#else
 		mqttClient.connect("EPD-Clock");
 		#endif
 		if (!mqttClient.connected()) {
-			delay(250);
+			delay(100);  // Faster retry
 		}
 	}
 
 	if (mqttClient.connected()) {
 		mqttClient.subscribe(MQTT_TOPIC);
 
-		// Wait briefly for any retained message or new message
+		// Reduced wait time for retained messages (1s instead of 2s)
+		// Retained messages arrive almost immediately
 		unsigned long waitStart = millis();
-		while (millis() - waitStart < 2000) {
+		while (millis() - waitStart < 1000) {
 			mqttClient.loop();
 			if (mqttMessageReceived) {
 				break;
 			}
-			delay(50);
+			delay(20);  // Faster polling
 		}
 
 		mqttClient.disconnect();
@@ -425,6 +430,8 @@ void checkMqtt(bool wifiAlreadyEnabled = false) {
 		_drawMqttMsg = true;
 	}
 	mqttMessageReceived = false;
+
+	time(&lastMqttUpdate);  // Track last MQTT check time
 
 	if (!wifiAlreadyEnabled) {
 		disableWifi();
@@ -596,10 +603,7 @@ void partialRedraw() {
 	epd_poweron();
 	drawClock();
 	if (_drawWeather) drawWeather();
-	if (waketime - lastVoltageUpdate >= VOLTAGE_INTERVAL) {
-		getVoltage();
-		if (_drawVoltage) drawVoltage();
-	}
+	if (_drawVoltage) drawVoltage();
 	if (_drawMqttMsg) drawStatusMsg();
 	epd_poweroff_all();
 }
@@ -637,15 +641,20 @@ void setup() {
 	} else {
 		time(&waketime);
 		bool r = waketime - lastRedraw >= REDRAW_INTERVAL;
+
 		// Consolidate WiFi operations when multiple updates are needed
 		bool needNtp = (waketime - lastNtpUpdate >= NTP_INTERVAL);
 		bool needWeather = (waketime - lastWeatherUpdate >= WEATHER_INTERVAL);
 		#ifdef MQTT_SERVER
-		bool needMqtt = true;  // Check MQTT every wake cycle
+		#ifndef MQTT_INTERVAL
+		#define MQTT_INTERVAL 60  // Default: check every minute
+		#endif
+		bool needMqtt = (waketime - lastMqttUpdate >= MQTT_INTERVAL);
 		#else
 		bool needMqtt = false;
 		#endif
 
+		// Only enable WiFi if we actually need network operations
 		if (needNtp || needWeather || needMqtt) {
 			if (enableWifi()) {
 				if (needNtp) {
@@ -665,11 +674,31 @@ void setup() {
 		}
 
 		getClock();
-		if (!r) partialRedraw();
-		setClock();
-		if (_drawWeather) setWeather();
-		if (_drawMqttMsg) saveStatusMsg();
-		if (r) redraw();
+
+		// Check voltage on schedule (doesn't require WiFi)
+		if (waketime - lastVoltageUpdate >= VOLTAGE_INTERVAL) {
+			getVoltage();
+		}
+
+		// Only power on EPD if there's something to update
+		bool needsDisplayUpdate = (strcmp(tod, _tod) != 0) || _drawDate || _drawWeather || _drawVoltage || _drawMqttMsg;
+
+		if (r) {
+			// Full redraw needed
+			setClock();
+			if (_drawWeather) setWeather();
+			if (_drawMqttMsg) saveStatusMsg();
+			redraw();
+		} else if (needsDisplayUpdate) {
+			// Partial update needed
+			partialRedraw();
+			setClock();
+			if (_drawWeather) setWeather();
+			if (_drawMqttMsg) saveStatusMsg();
+		} else {
+			// Nothing to update - skip EPD entirely (saves power!)
+			setClock();
+		}
 	}
 
 	int nextRun = (60 - (waketime % 60));
