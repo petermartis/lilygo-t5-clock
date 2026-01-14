@@ -171,11 +171,14 @@ void clearString(int x, int y, const char* text, alignment align) {
 	get_text_bounds(&currentFont, (char*)text, &xx, &yy, &x1, &y1, &w, &h, NULL);
 	if (align == RIGHT)  x = x - w;
 	if (align == CENTER) x = x - w / 2;
+	// Add padding to prevent artifacts from partial refresh
+	const int hPadding = 15;  // Extra horizontal padding
+	const int vPadding = 5;   // Extra vertical padding
 	Rect_t area = {
-		.x = x,
-		.y = y - h,
-		.width = w,
-		.height = h,
+		.x = x - hPadding,
+		.y = y - h - vPadding,
+		.width = w + (2 * hPadding),
+		.height = h + (2 * vPadding),
 	};
 	epd_clear_area(area);
 }
