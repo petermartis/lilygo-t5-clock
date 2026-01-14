@@ -24,8 +24,9 @@ static const IconMapping ICON_MAP[] = {
 };
 
 OpenWeather::OpenWeather(const char* Key, float lat, float longi) {
+	// Use free 2.5 Current Weather API instead of paid OneCall 3.0
 	snprintf(_url, sizeof(_url),
-		"/data/3.0/onecall?lat=%.6f&lon=%.6f&appid=%s&units=metric&exclude=minutely,hourly,daily,alerts",
+		"/data/2.5/weather?lat=%.6f&lon=%.6f&appid=%s&units=metric",
 		lat, longi, Key);
 	_errorDetail[0] = '\0';
 }
@@ -35,7 +36,7 @@ WeatherError OpenWeather::updateStatus(weatherData *w) {
 	const char *openweather = "api.openweathermap.org";
 	const int httpsPort = 443;
 	WiFiClientSecure httpsClient;
-	const size_t capacity = 4096;  // OneCall API responses can be 2-4KB
+	const size_t capacity = 2048;  // 2.5 API responses are smaller
 	httpsClient.setInsecure();
 	httpsClient.setTimeout(15000);
 
@@ -78,14 +79,6 @@ WeatherError OpenWeather::updateStatus(weatherData *w) {
 	// Check HTTP status code
 	if (httpCode != 200) {
 		snprintf(_errorDetail, sizeof(_errorDetail), "HTTP %d", httpCode);
-		// Read a bit of the error response for context
-		if (httpsClient.connected()) {
-			String errBody = httpsClient.readStringUntil('\n');
-			// Truncate if too long
-			if (errBody.length() > 30) {
-				errBody = errBody.substring(0, 30) + "...";
-			}
-		}
 		return WEATHER_ERR_API_ERROR;
 	}
 
@@ -111,37 +104,39 @@ WeatherError OpenWeather::updateStatus(weatherData *w) {
 	}
 
 	// Check for API error response
-	if (doc.containsKey("cod") && doc.containsKey("message")) {
-		const char* msg = doc["message"] | "unknown";
+	if (doc.containsKey("cod") && doc["cod"].as<int>() != 200) {
+		const char* msg = doc["message"] | "unknown error";
 		snprintf(_errorDetail, sizeof(_errorDetail), "API: %s", msg);
 		return WEATHER_ERR_API_ERROR;
 	}
 
-	if (!doc.containsKey("current")) {
-		snprintf(_errorDetail, sizeof(_errorDetail), "No 'current' in response");
+	// Parse weather data from 2.5 API format
+	// Weather icon from weather[0].icon
+	if (doc.containsKey("weather") && doc["weather"].size() > 0) {
+		const char* iconStr = doc["weather"][0]["icon"] | "";
+		strncpy(w->icon, iconStr, sizeof(w->icon) - 1);
+		w->icon[sizeof(w->icon) - 1] = '\0';
+	} else {
+		snprintf(_errorDetail, sizeof(_errorDetail), "No weather data");
 		return WEATHER_ERR_NO_DATA;
 	}
 
-	// Parse weather data
-	if (doc["current"].containsKey("weather") && doc["current"]["weather"].size() > 0) {
-		const char* iconStr = doc["current"]["weather"][0]["icon"] | "";
-		strncpy(w->icon, iconStr, sizeof(w->icon) - 1);
-		w->icon[sizeof(w->icon) - 1] = '\0';
+	// Main weather data from "main" object
+	if (doc.containsKey("main")) {
+		JsonObject main = doc["main"];
+		w->current_Temp = main["temp"] | 0.0f;
+		w->feels_like = main["feels_like"] | 0.0f;
+		w->humidity = main["humidity"] | 0;
+	} else {
+		snprintf(_errorDetail, sizeof(_errorDetail), "No 'main' in response");
+		return WEATHER_ERR_NO_DATA;
 	}
-	if (doc["current"].containsKey("temp")) {
-		w->current_Temp = doc["current"]["temp"].as<float>();
-	}
-	if (doc["current"].containsKey("feels_like")) {
-		w->feels_like = doc["current"]["feels_like"].as<float>();
-	}
-	if (doc["current"].containsKey("humidity")) {
-		w->humidity = doc["current"]["humidity"].as<int>();
-	}
-	if (doc["current"].containsKey("wind_speed")) {
-		w->wind_speed = doc["current"]["wind_speed"].as<float>();
-	}
-	if (doc["current"].containsKey("wind_deg")) {
-		w->wind_direction = doc["current"]["wind_deg"].as<int>();
+
+	// Wind data from "wind" object
+	if (doc.containsKey("wind")) {
+		JsonObject wind = doc["wind"];
+		w->wind_speed = wind["speed"] | 0.0f;
+		w->wind_direction = wind["deg"] | 0;
 	}
 
 	_errorDetail[0] = '\0';
