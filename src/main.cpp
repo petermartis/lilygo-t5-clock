@@ -36,31 +36,31 @@
 #define MQTT_MSG_HEIGHT 25
 
 const uint CLOCK_X = H_MARGIN;
-const uint CLOCK_Y = 175;
+const uint CLOCK_Y = 165;  // Moved up 10px
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
-const uint DATE_Y1 = 105;
-const uint DATE_Y2 = CLOCK_Y;
+const uint DATE_Y1 = 95;   // Moved up 10px (day of week)
+const uint DATE_Y2 = 160;  // Moved up 15px (month)
 // Battery at bottom right corner (pushed right and down to avoid overlap)
 const uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width + 5;
 const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height + 5;
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
 const uint START_TIME_Y = EPD_HEIGHT - V_MARGIN;
-// Weather section moved up by 50px to fill gap below time/date
+// Weather section - moved up 15px from previous position
 const uint WICON_X = H_MARGIN;
-const uint WICON_Y = 400;
+const uint WICON_Y = 385;
 const uint CTEMP_X = 235;
-const uint CTEMP_Y = 400;
+const uint CTEMP_Y = 385;
 const uint FTEMP_X = 235;
-const uint FTEMP_Y = 300;
+const uint FTEMP_Y = 285;
 const uint WIND_X = EPD_WIDTH - H_MARGIN;
-const uint WIND_Y = 300;
+const uint WIND_Y = 285;
 const uint HUMID_X = WIND_X;
-const uint HUMID_Y = 350;
+const uint HUMID_Y = 335;
 const uint WUPDATE_X = WIND_X;
-const uint WUPDATE_Y = 400;
-// MQTT message area - full width, moved up from edge
+const uint WUPDATE_Y = 385;
+// MQTT message area - center aligned, moved up 10px
 const uint MQTT_X = EPD_WIDTH / 2;  // Center aligned
-const uint MQTT_Y = EPD_HEIGHT - 25; // Moved up more from edge
+const uint MQTT_Y = EPD_HEIGHT - 35; // Moved up 10px
 
 /**
  * WICON_AREA is used when erasing the weather icon prior to redrawing.
@@ -71,7 +71,7 @@ const uint MQTT_Y = EPD_HEIGHT - 25; // Moved up more from edge
  */
 const Rect_t WICON_AREA = {
 	.x = H_MARGIN,
-	.y = 220,  // Below date area
+	.y = 205,  // Below date area, moved up 15px
 	.width = (int32_t)(CTEMP_X - H_MARGIN - 5),
 	.height = 200,  // Covers weather icon area
 };
@@ -86,8 +86,8 @@ const Rect_t BATT_AREA = {
 // MQTT message area - limited width to avoid battery icon overlap
 const Rect_t MQTT_AREA = {
 	.x = H_MARGIN,
-	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 25,
-	.width = EPD_WIDTH - (2 * H_MARGIN) - batt_100_width - 10,  // Leave space for battery
+	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 35,  // Moved up 10px
+	.width = EPD_WIDTH - (2 * H_MARGIN) - batt_100_width - 20,  // Leave more space for battery
 	.height = MQTT_MSG_HEIGHT + 10,
 };
 
@@ -119,7 +119,7 @@ RTC_DATA_ATTR int minute = -1;
 RTC_DATA_ATTR int dayOfWeek = -1;
 RTC_DATA_ATTR int vref = 1100;
 RTC_DATA_ATTR bool adcCalibrated = false;  // Cache ADC calibration status
-RTC_DATA_ATTR int batt = 5;
+RTC_DATA_ATTR int batt = 4;  // Start with full icon, will be updated on first voltage check
 RTC_DATA_ATTR float voltage = -1;
 RTC_DATA_ATTR char tod[10];
 RTC_DATA_ATTR char dow[20];
@@ -250,23 +250,35 @@ void getVoltage() {
 		if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) vref = adc_chars.vref;
 		adcCalibrated = true;
 	}
-	uint16_t v = analogRead(BATT_PIN);
+
+	// Take multiple samples and average for stability (LilyGo T5 recommendation)
+	uint32_t sum = 0;
+	for (int i = 0; i < 10; i++) {
+		sum += analogRead(BATT_PIN);
+		delay(2);
+	}
+	uint16_t v = sum / 10;
+
+	// LilyGo T5-4.7 uses 2:1 voltage divider (100K/100K)
 	float _voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
-	if (_voltage != voltage) {
+
+	// Only update if voltage changed significantly (0.05V threshold to avoid flicker)
+	if (abs(_voltage - voltage) > 0.05 || voltage < 0) {
 		voltage = _voltage;
-		// These values were arrived at via careful reasoning and due consideration, I assure you. I absolutely did not just make them up.
-		if (voltage < 3.7) {
-			_batt = 0;
+		// LiPo discharge curve thresholds (adjusted for LilyGo T5)
+		// Full charge: 4.2V, nominal: 3.7V, cutoff: 3.3V
+		if (voltage < 3.4) {
+			_batt = 0;       // Critical - below 3.4V
+		} else if (voltage < 3.6) {
+			_batt = 1;       // Low - 3.4V to 3.6V (25%)
 		} else if (voltage < 3.8) {
-			_batt = 1;
-		} else if (voltage < 3.9) {
-			_batt = 2;
-		} else if (voltage < 4) {
-			_batt = 3;
+			_batt = 2;       // Medium - 3.6V to 3.8V (50%)
+		} else if (voltage < 4.0) {
+			_batt = 3;       // Good - 3.8V to 4.0V (75%)
 		} else {
-			_batt = 4;
+			_batt = 4;       // Full - above 4.0V (100%)
 		}
-		if (batt != _batt) {
+		if (batt != _batt || batt > 4) {  // Also update if batt was uninitialized
 			batt = _batt;
 			_drawVoltage = true;
 		}
@@ -586,12 +598,14 @@ void setWeather() {
 }
 
 void redraw() {
+	// Read voltage BEFORE powering EPD for accurate measurement
+	if (firstRun) getVoltage();
+
 	epd_init();
 	epd_poweron();
 	epd_clear();
 	redrawClock();
 	redrawWeather();
-	if (firstRun) getVoltage();
 	redrawVoltage();
 	redrawStatusMsg();
 	epd_poweroff_all();
