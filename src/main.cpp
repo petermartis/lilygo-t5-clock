@@ -13,7 +13,6 @@
 #include "NK5748b.h"
 #include "NK5772b.h"
 #include "Meteocons96.h"
-#include "esp_adc_cal.h"
 #include <Wire.h>
 #include <sys/time.h>
 #include "WiFi.h"
@@ -21,13 +20,6 @@
 #include <NTPClient.h>
 #include <PubSubClient.h>
 #include "SimpleWeather.h"
-#include "batt_100.h"
-#include "batt_75.h"
-#include "batt_50.h"
-#include "batt_25.h"
-#include "batt_0.h"
-
-#define BATT_PIN 36
 
 #define EPD_WIDTH 960
 #define EPD_HEIGHT 540
@@ -40,9 +32,6 @@ const uint CLOCK_Y = 165;  // Moved up 10px
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
 const uint DATE_Y1 = 95;   // Moved up 10px (day of week)
 const uint DATE_Y2 = 160;  // Moved up 15px (month)
-// Battery at bottom right corner (pushed right and down to avoid overlap)
-const uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width + 5;
-const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height + 5;
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
 const uint START_TIME_Y = EPD_HEIGHT - V_MARGIN;
 // Weather section - moved up 15px from previous position
@@ -58,8 +47,8 @@ const uint HUMID_X = WIND_X;
 const uint HUMID_Y = 335;
 const uint WUPDATE_X = WIND_X;
 const uint WUPDATE_Y = 385;
-// MQTT message area - left aligned to avoid complexity with centering
-const uint MQTT_AREA_WIDTH = EPD_WIDTH - (2 * H_MARGIN) - batt_100_width - 40;  // Extra margin from battery
+// MQTT message area - left aligned, full width available
+const uint MQTT_AREA_WIDTH = EPD_WIDTH - (2 * H_MARGIN);
 const uint MQTT_X = H_MARGIN;  // Left aligned
 const uint MQTT_Y = EPD_HEIGHT - 35;
 
@@ -77,14 +66,7 @@ const Rect_t WICON_AREA = {
 	.height = 200,  // Covers weather icon area
 };
 
-const Rect_t BATT_AREA = {
-	.x = BATT_X,
-	.y = BATT_Y,
-	.width = batt_100_width,
-	.height = batt_100_height,
-};
-
-// MQTT message area - limited width to avoid battery icon overlap
+// MQTT message area - full width
 const Rect_t MQTT_AREA = {
 	.x = H_MARGIN - 5,  // Slight padding on left
 	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 45,  // Extra vertical padding for clearing
@@ -99,7 +81,6 @@ bool _drawTemp = false;
 bool _drawFtemp = false;
 bool _drawWind = false;
 bool _drawHumidity = false;
-bool _drawVoltage = false;
 bool _drawMqttMsg = false;
 char _tod[10];
 char _dow[20];
@@ -111,17 +92,12 @@ char _wWind[25];
 char _wHumidity[20];
 char _wUpdated[20];
 char _mqttMsg[128];
-uint8_t _batt = 0;
 time_t waketime;
 enum alignment { LEFT, RIGHT, CENTER };
 
 RTC_DATA_ATTR bool firstRun = true;
 RTC_DATA_ATTR int minute = -1;
 RTC_DATA_ATTR int dayOfWeek = -1;
-RTC_DATA_ATTR int vref = 1100;
-RTC_DATA_ATTR bool adcCalibrated = false;  // Cache ADC calibration status
-RTC_DATA_ATTR int batt = 4;  // Start with full icon, will be updated on first voltage check
-RTC_DATA_ATTR float voltage = -1;
 RTC_DATA_ATTR char tod[10];
 RTC_DATA_ATTR char dow[20];
 RTC_DATA_ATTR char mdy[50];
@@ -132,7 +108,6 @@ RTC_DATA_ATTR char wWind[25];
 RTC_DATA_ATTR char wHumidity[20];
 RTC_DATA_ATTR char wUpdated[20];
 RTC_DATA_ATTR time_t lastNtpUpdate;
-RTC_DATA_ATTR time_t lastVoltageUpdate;
 RTC_DATA_ATTR time_t lastWeatherUpdate;
 RTC_DATA_ATTR time_t lastMqttUpdate;  // Track MQTT check timing
 RTC_DATA_ATTR time_t lastRedraw;
@@ -241,78 +216,6 @@ void setClock() {
 		strcpy(dow, _dow);
 		strcpy(mdy, _mdy);
 	}
-}
-
-void getVoltage() {
-	// Initialize ADC for battery reading (LilyGo T5-4.7 specific)
-	if (!adcCalibrated) {
-		// Configure ADC
-		analogReadResolution(12);  // 12-bit resolution (0-4095)
-		analogSetAttenuation(ADC_11db);  // For full voltage range
-
-		// Calibrate using eFuse vref if available
-		esp_adc_cal_characteristics_t adc_chars;
-		esp_adc_cal_value_t val_type = esp_adc_cal_characterize(
-			ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
-		if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) {
-			vref = adc_chars.vref;
-		}
-		adcCalibrated = true;
-	}
-
-	// Take multiple samples and average for stability
-	uint32_t sum = 0;
-	for (int i = 0; i < 10; i++) {
-		sum += analogRead(BATT_PIN);
-		delay(5);  // Slightly longer delay for ADC settling
-	}
-	uint16_t v = sum / 10;
-
-	// LilyGo T5-4.7: Battery through 2:1 voltage divider
-	// Formula: voltage = (ADC_reading / 4095) * 3.3V * 2 * (vref_correction)
-	float _voltage = ((float)v / 4095.0) * 2.0 * 3.3 * (vref / 1000.0);
-
-	// Only update if voltage changed significantly (0.05V threshold to avoid flicker)
-	if (abs(_voltage - voltage) > 0.05 || voltage < 0) {
-		voltage = _voltage;
-		// LiPo discharge curve thresholds (adjusted for LilyGo T5)
-		// Full charge: 4.2V, nominal: 3.7V, cutoff: 3.3V
-		if (voltage < 3.4) {
-			_batt = 0;       // Critical - below 3.4V
-		} else if (voltage < 3.6) {
-			_batt = 1;       // Low - 3.4V to 3.6V (25%)
-		} else if (voltage < 3.8) {
-			_batt = 2;       // Medium - 3.6V to 3.8V (50%)
-		} else if (voltage < 4.0) {
-			_batt = 3;       // Good - 3.8V to 4.0V (75%)
-		} else {
-			_batt = 4;       // Full - above 4.0V (100%)
-		}
-		if (batt != _batt || batt > 4) {  // Also update if batt was uninitialized
-			batt = _batt;
-			_drawVoltage = true;
-		}
-	}
-	time(&lastVoltageUpdate);
-}
-
-void redrawVoltage() {
-	if (batt == 0) {
-		epd_draw_grayscale_image(BATT_AREA, (uint8_t *)batt_0_data);
-	} else if (batt == 1) {
-		epd_draw_grayscale_image(BATT_AREA, (uint8_t *)batt_25_data);
-	} else if (batt == 2) {
-		epd_draw_grayscale_image(BATT_AREA, (uint8_t *)batt_50_data);
-	} else if (batt == 3) {
-		epd_draw_grayscale_image(BATT_AREA, (uint8_t *)batt_75_data);
-	} else {
-		epd_draw_grayscale_image(BATT_AREA, (uint8_t *)batt_100_data);
-	}
-}
-
-void drawVoltage() {
-	epd_clear_area(BATT_AREA);
-	redrawVoltage();
 }
 
 // Status/Message display functions (used for MQTT messages and error/warning display)
@@ -608,15 +511,11 @@ void setWeather() {
 }
 
 void redraw() {
-	// Read voltage BEFORE powering EPD for accurate measurement
-	if (firstRun) getVoltage();
-
 	epd_init();
 	epd_poweron();
 	epd_clear();
 	redrawClock();
 	redrawWeather();
-	redrawVoltage();
 	redrawStatusMsg();
 	epd_poweroff_all();
 	time(&lastRedraw);
@@ -627,7 +526,6 @@ void partialRedraw() {
 	epd_poweron();
 	drawClock();
 	if (_drawWeather) drawWeather();
-	if (_drawVoltage) drawVoltage();
 	if (_drawMqttMsg) drawStatusMsg();
 	epd_poweroff_all();
 }
@@ -699,13 +597,8 @@ void setup() {
 
 		getClock();
 
-		// Check voltage on schedule (doesn't require WiFi)
-		if (waketime - lastVoltageUpdate >= VOLTAGE_INTERVAL) {
-			getVoltage();
-		}
-
 		// Only power on EPD if there's something to update
-		bool needsDisplayUpdate = (strcmp(tod, _tod) != 0) || _drawDate || _drawWeather || _drawVoltage || _drawMqttMsg;
+		bool needsDisplayUpdate = (strcmp(tod, _tod) != 0) || _drawDate || _drawWeather || _drawMqttMsg;
 
 		if (r) {
 			// Full redraw needed
