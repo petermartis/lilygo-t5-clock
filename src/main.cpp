@@ -40,39 +40,40 @@ const uint CLOCK_Y = 175;
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
 const uint DATE_Y1 = 105;
 const uint DATE_Y2 = CLOCK_Y;
-// Battery moved up to make room for MQTT message area
+// Battery at bottom right
 const uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width;
-const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height - MQTT_MSG_HEIGHT - 10;
+const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height;
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
 const uint START_TIME_Y = EPD_HEIGHT - V_MARGIN;
+// Weather section moved up by 50px to fill gap below time/date
 const uint WICON_X = H_MARGIN;
-const uint WICON_Y = 450;
+const uint WICON_Y = 400;
 const uint CTEMP_X = 235;
-const uint CTEMP_Y = 450;
+const uint CTEMP_Y = 400;
 const uint FTEMP_X = 235;
-const uint FTEMP_Y = 350;
+const uint FTEMP_Y = 300;
 const uint WIND_X = EPD_WIDTH - H_MARGIN;
-const uint WIND_Y = 350;
+const uint WIND_Y = 300;
 const uint HUMID_X = WIND_X;
-const uint HUMID_Y = 400;
+const uint HUMID_Y = 350;
 const uint WUPDATE_X = WIND_X;
-const uint WUPDATE_Y = 450;
-// MQTT message area - full width at bottom
+const uint WUPDATE_Y = 400;
+// MQTT message area - full width, moved up from edge
 const uint MQTT_X = EPD_WIDTH / 2;  // Center aligned
-const uint MQTT_Y = EPD_HEIGHT - 5; // Near bottom with small margin
+const uint MQTT_Y = EPD_HEIGHT - 15; // Moved up from edge
 
 /**
  * WICON_AREA is used when erasing the weather icon prior to redrawing.
  * I may have messed up when generating the Meteocons font, or it may just be
  * that it's an unusual font. Either way, the clearString function wasn't
  * consistently erasing the entire previous icon. Here we'll just define a
- * large area that definitely eoncompasses the whole thing.
+ * large area that definitely encompasses the whole thing.
  */
 const Rect_t WICON_AREA = {
 	.x = H_MARGIN,
-	.y = (int32_t)(EPD_HEIGHT / 2) - 10,
+	.y = 220,  // Below date area
 	.width = (int32_t)(CTEMP_X - H_MARGIN - 5),
-	.height = (int32_t)(BATT_Y - (EPD_HEIGHT / 2) + 10),
+	.height = 200,  // Covers weather icon area
 };
 
 const Rect_t BATT_AREA = {
@@ -82,12 +83,12 @@ const Rect_t BATT_AREA = {
 	.height = batt_100_height,
 };
 
-// MQTT message area - full width, 25px tall at bottom
+// MQTT message area - full width at bottom
 const Rect_t MQTT_AREA = {
 	.x = H_MARGIN,
-	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 5,
+	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 15,
 	.width = EPD_WIDTH - (2 * H_MARGIN),
-	.height = MQTT_MSG_HEIGHT + 5,
+	.height = MQTT_MSG_HEIGHT + 10,
 };
 
 bool _drawDate = false;
@@ -316,9 +317,21 @@ void clearStatusMsg() {
 	}
 }
 
+// Choose font size based on message length
+void setStatusFont(const char* msg) {
+	size_t len = strlen(msg);
+	if (len > 60) {
+		setFont(NK5715B);  // Smallest - for long messages
+	} else if (len > 35) {
+		setFont(NK5715B);  // Small
+	} else {
+		setFont(NK5724B);  // Medium - for short messages
+	}
+}
+
 void redrawStatusMsg() {
 	if (mqttMsg[0] != '\0') {
-		setFont(NK5715B);
+		setStatusFont(mqttMsg);
 		drawString(MQTT_X, MQTT_Y, mqttMsg, CENTER);
 	}
 }
@@ -326,7 +339,7 @@ void redrawStatusMsg() {
 void drawStatusMsg() {
 	epd_clear_area(MQTT_AREA);
 	if (_mqttMsg[0] != '\0') {
-		setFont(NK5715B);
+		setStatusFont(_mqttMsg);
 		drawString(MQTT_X, MQTT_Y, _mqttMsg, CENTER);
 	}
 }
