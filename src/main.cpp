@@ -58,10 +58,10 @@ const uint HUMID_X = WIND_X;
 const uint HUMID_Y = 335;
 const uint WUPDATE_X = WIND_X;
 const uint WUPDATE_Y = 385;
-// MQTT message area - center within available space (excluding battery area)
-const uint MQTT_AREA_WIDTH = EPD_WIDTH - (2 * H_MARGIN) - batt_100_width - 30;
-const uint MQTT_X = H_MARGIN + (MQTT_AREA_WIDTH / 2);  // Center within available area
-const uint MQTT_Y = EPD_HEIGHT - 35; // Moved up 10px
+// MQTT message area - left aligned to avoid complexity with centering
+const uint MQTT_AREA_WIDTH = EPD_WIDTH - (2 * H_MARGIN) - batt_100_width - 40;  // Extra margin from battery
+const uint MQTT_X = H_MARGIN;  // Left aligned
+const uint MQTT_Y = EPD_HEIGHT - 35;
 
 /**
  * WICON_AREA is used when erasing the weather icon prior to redrawing.
@@ -86,10 +86,10 @@ const Rect_t BATT_AREA = {
 
 // MQTT message area - limited width to avoid battery icon overlap
 const Rect_t MQTT_AREA = {
-	.x = H_MARGIN,
-	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 35,  // Moved up 10px
-	.width = (int32_t)MQTT_AREA_WIDTH,
-	.height = MQTT_MSG_HEIGHT + 10,
+	.x = H_MARGIN - 5,  // Slight padding on left
+	.y = EPD_HEIGHT - MQTT_MSG_HEIGHT - 45,  // Extra vertical padding for clearing
+	.width = (int32_t)MQTT_AREA_WIDTH + 10,
+	.height = MQTT_MSG_HEIGHT + 20,  // More height for complete clearing
 };
 
 bool _drawDate = false;
@@ -357,7 +357,7 @@ void setStatusFont(const char* msg) {
 void redrawStatusMsg() {
 	if (mqttMsg[0] != '\0') {
 		setStatusFont(mqttMsg);
-		drawString(MQTT_X, MQTT_Y, mqttMsg, CENTER);
+		drawString(MQTT_X, MQTT_Y, mqttMsg, LEFT);
 	}
 }
 
@@ -365,7 +365,7 @@ void drawStatusMsg() {
 	epd_clear_area(MQTT_AREA);
 	if (_mqttMsg[0] != '\0') {
 		setStatusFont(_mqttMsg);
-		drawString(MQTT_X, MQTT_Y, _mqttMsg, CENTER);
+		drawString(MQTT_X, MQTT_Y, _mqttMsg, LEFT);
 	}
 }
 
