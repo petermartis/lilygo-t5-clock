@@ -31,9 +31,9 @@
 const uint CLOCK_X = H_MARGIN;
 const uint CLOCK_Y = 165;  // Moved up 10px
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
-const uint DATE_Y1 = 95;   // Day of week
-const uint DATE_Y2 = 150;  // Month (moved up 10px)
-const uint DATE_Y3 = 195;  // Name day (below month)
+const uint DATE_Y1 = 88;   // Day of week (up 7px)
+const uint DATE_Y2 = 142;  // Month (up 8px)
+const uint DATE_Y3 = 190;  // Name day (up 5px)
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
 const uint START_TIME_Y = EPD_HEIGHT - V_MARGIN;
 // Weather section - moved up 15px from previous position
