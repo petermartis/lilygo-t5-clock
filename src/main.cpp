@@ -20,6 +20,7 @@
 #include <NTPClient.h>
 #include <PubSubClient.h>
 #include "SimpleWeather.h"
+#include "namedays.h"
 
 #define EPD_WIDTH 960
 #define EPD_HEIGHT 540
@@ -30,8 +31,9 @@
 const uint CLOCK_X = H_MARGIN;
 const uint CLOCK_Y = 165;  // Moved up 10px
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
-const uint DATE_Y1 = 95;   // Moved up 10px (day of week)
-const uint DATE_Y2 = 160;  // Moved up 15px (month)
+const uint DATE_Y1 = 95;   // Day of week
+const uint DATE_Y2 = 150;  // Month (moved up 10px)
+const uint DATE_Y3 = 195;  // Name day (below month)
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
 const uint START_TIME_Y = EPD_HEIGHT - V_MARGIN;
 // Weather section - moved up 15px from previous position
@@ -85,6 +87,7 @@ bool _drawMqttMsg = false;
 char _tod[10];
 char _dow[20];
 char _mdy[50];
+char _nameDay[30];
 char _wIcon[5];
 char _wTemp[10];
 char _wFeels[20];
@@ -101,6 +104,7 @@ RTC_DATA_ATTR int dayOfWeek = -1;
 RTC_DATA_ATTR char tod[10];
 RTC_DATA_ATTR char dow[20];
 RTC_DATA_ATTR char mdy[50];
+RTC_DATA_ATTR char nameDay[30];
 RTC_DATA_ATTR char wIcon[5];
 RTC_DATA_ATTR char wTemp[10];
 RTC_DATA_ATTR char wFeels[20];
@@ -185,6 +189,7 @@ void redrawClock() {
 	drawString(DATE_X, DATE_Y1, dow, RIGHT);
 	setFont(NK5715B);  // Smaller font for date
 	drawString(DATE_X, DATE_Y2, mdy, RIGHT);
+	drawString(DATE_X, DATE_Y3, nameDay, RIGHT);  // Name day
 }
 
 void drawClock() {
@@ -195,6 +200,7 @@ void drawClock() {
 		drawString(DATE_X, DATE_Y1, _dow, dow, RIGHT);
 		setFont(NK5715B);  // Smaller font for date
 		drawString(DATE_X, DATE_Y2, _mdy, mdy, RIGHT);
+		drawString(DATE_X, DATE_Y3, _nameDay, nameDay, RIGHT);  // Name day
 	}
 }
 
@@ -207,6 +213,10 @@ void getClock() {
 		dayOfWeek = now.tm_wday;
 		strftime(_dow, 20, "%A", &now);
 		strftime(_mdy, 50, "%B %d", &now);  // Full month name, no year
+		// Get name day for today
+		const char* nd = getNameDay(now.tm_mon + 1, now.tm_mday);
+		strncpy(_nameDay, nd, sizeof(_nameDay) - 1);
+		_nameDay[sizeof(_nameDay) - 1] = '\0';
 	}
 }
 
@@ -215,6 +225,7 @@ void setClock() {
 	if (_drawDate) {
 		strcpy(dow, _dow);
 		strcpy(mdy, _mdy);
+		strcpy(nameDay, _nameDay);
 	}
 }
 
