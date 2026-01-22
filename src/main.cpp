@@ -104,6 +104,8 @@ RTC_DATA_ATTR int dayOfWeek = -1;
 RTC_DATA_ATTR int vref = 1100;
 RTC_DATA_ATTR int batt = 5;
 RTC_DATA_ATTR float voltage = -1;
+RTC_DATA_ATTR int lastBattX = -1;
+RTC_DATA_ATTR int lastBattY = -1;
 RTC_DATA_ATTR char tod[10];
 RTC_DATA_ATTR char dow[20];
 RTC_DATA_ATTR char mdy[50];
@@ -283,8 +285,22 @@ void redrawVoltage() {
 }
 
 void drawVoltage() {
+	// Clear old battery position if it exists and has moved
+	if (lastBattX >= 0 && lastBattY >= 0 && (lastBattX != BATT_X || lastBattY != BATT_Y)) {
+		Rect_t oldArea = {
+			.x = lastBattX,
+			.y = lastBattY,
+			.width = batt_100_width,
+			.height = batt_100_height,
+		};
+		epd_clear_area(oldArea);
+	}
+	// Clear and draw at new position
 	epd_clear_area(BATT_AREA);
 	redrawVoltage();
+	// Remember this position for next time
+	lastBattX = BATT_X;
+	lastBattY = BATT_Y;
 }
 
 void enableWifi() {
