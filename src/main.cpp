@@ -29,6 +29,10 @@
 #define MQTT_MSG_HEIGHT 25
 // BATT_PIN is defined in LilyGo library (GPIO 14 for ESP32-S3)
 
+// Battery icon dimensions (must be defined before use in functions)
+#define BATT_ICON_W 20
+#define BATT_ICON_H 10
+
 const uint CLOCK_X = H_MARGIN;
 const uint CLOCK_Y = 165;  // Moved up 10px
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
@@ -387,8 +391,6 @@ static const uint8_t BATT_ICON_4[] = {
 };
 
 static const uint8_t* BATT_ICONS[] = {BATT_ICON_0, BATT_ICON_1, BATT_ICON_2, BATT_ICON_3, BATT_ICON_4};
-#define BATT_ICON_W 20
-#define BATT_ICON_H 10
 
 void drawBatteryIcon(int x, int y, uint8_t level, bool clear) {
 	// Battery icon: 20x10 pixels using bitmap
