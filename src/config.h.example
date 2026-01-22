@@ -1,0 +1,25 @@
+// WiFi Configuration
+#define WIFI_SSID "your_wifi_ssid"
+#define WIFI_PASS "your_wifi_password"
+
+// OpenWeatherMap Configuration
+#define OWM_KEY "your_openweathermap_api_key"
+#define OWM_LAT 48.3774  // Your latitude
+#define OWM_LON 17.5872  // Your longitude
+
+// Timezone: Central European Time (Prague, Berlin, Amsterdam)
+// CET = UTC+1, CEST starts last Sunday of March, ends last Sunday of October
+#define TZ_INFO "CET-1CEST,M3.5.0,M10.5.0/3"
+
+// Update intervals (in seconds)
+#define VOLTAGE_INTERVAL 1800  // 30 minutes between battery voltage updates
+#define NTP_INTERVAL     3600  // 1 hour between NTP updates
+#define WEATHER_INTERVAL 1800  // 30 minutes between weather updates
+#define REDRAW_INTERVAL  3600  // 1 hour between full screen redraws
+
+// MQTT Configuration for calendar notifications
+#define MQTT_SERVER "192.168.1.100"
+#define MQTT_PORT 1883
+#define MQTT_TOPIC "calendar/appt"
+#define MQTT_INTERVAL    60    // Seconds between MQTT checks (60 = every minute, 300 = every 5 min)
+// No authentication required
