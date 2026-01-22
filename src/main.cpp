@@ -67,7 +67,7 @@ const Rect_t WICON_AREA = {
 	.x = H_MARGIN,
 	.y = (int32_t)(EPD_HEIGHT / 2) - 10,
 	.width = (int32_t)(CTEMP_X - H_MARGIN - 5),
-	.height = (int32_t)(BATT_Y - (EPD_HEIGHT / 2) + 10),
+	.height = (int32_t)((EPD_HEIGHT - V_MARGIN - batt_100_height) - (EPD_HEIGHT / 2) + 10),
 };
 
 Rect_t BATT_AREA = {
@@ -217,12 +217,15 @@ void updateBatteryPosition() {
 	// Position battery 11 pixels to the right of the time text
 	BATT_X = CLOCK_X + w + 11;
 
-	// Align battery to sit on the same baseline as the time
-	BATT_Y = CLOCK_Y - batt_100_height;
+	// Align battery bottom to same line as time - adjusted to align properly
+	// The battery should sit on the baseline of the text
+	BATT_Y = CLOCK_Y - batt_100_height + 5;
 
-	// Update BATT_AREA
+	// Update BATT_AREA to use new position
 	BATT_AREA.x = BATT_X;
 	BATT_AREA.y = BATT_Y;
+	BATT_AREA.width = batt_100_width;
+	BATT_AREA.height = batt_100_height;
 }
 
 void getVoltage() {
@@ -446,13 +449,15 @@ void setup() {
 		}
 		if (waketime - lastWeatherUpdate >= WEATHER_INTERVAL) getWeather();
 		getClock();
-		if (!r) partialRedraw();
 		setClock();
-		if (_drawWeather) setWeather();
-		if (r) {
-			updateBatteryPosition();
+		// Always update battery position based on current time width
+		updateBatteryPosition();
+		if (!r) {
+			partialRedraw();
+		} else {
 			redraw();
 		}
+		if (_drawWeather) setWeather();
 	}
 
 	int nextRun = (60 - (waketime % 60));
