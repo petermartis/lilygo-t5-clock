@@ -456,14 +456,14 @@ void checkMqtt(bool wifiAlreadyEnabled = false) {
 		mqttClient.subscribe(MQTT_TOPIC);
 
 		// Reduced wait time for retained messages (1s instead of 2s)
-		// Retained messages arrive almost immediately
+		// Wait for retained messages (increased timeout)
 		unsigned long waitStart = millis();
-		while (millis() - waitStart < 1000) {
+		while (millis() - waitStart < 3000) {
 			mqttClient.loop();
 			if (mqttMessageReceived) {
 				break;
 			}
-			delay(20);  // Faster polling
+			delay(50);  // Poll every 50ms
 		}
 
 		mqttClient.disconnect();
