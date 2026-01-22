@@ -216,8 +216,8 @@ void updateBatteryPosition() {
 	// Position battery 11 pixels to the right of the time text
 	BATT_X = CLOCK_X + w + 11;
 
-	// Align battery bottom with text baseline
-	BATT_Y = CLOCK_Y - batt_100_height;
+	// Align battery bottom with text bottom (y1 + h is the bottom of the text bounding box)
+	BATT_Y = (y1 + h) - batt_100_height;
 
 	// Update BATT_AREA
 	BATT_AREA.x = BATT_X;
