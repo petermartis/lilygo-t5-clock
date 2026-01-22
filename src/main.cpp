@@ -97,6 +97,10 @@ uint8_t _batt = 0;
 time_t waketime;
 enum alignment { LEFT, RIGHT, CENTER };
 
+// Track previous battery position for clearing
+int oldBATT_X = -1;
+int oldBATT_Y = -1;
+
 RTC_DATA_ATTR bool firstRun = true;
 RTC_DATA_ATTR int minute = -1;
 RTC_DATA_ATTR int dayOfWeek = -1;
@@ -206,6 +210,10 @@ void setClock() {
 }
 
 void updateBatteryPosition() {
+	// Save old position for clearing
+	oldBATT_X = BATT_X;
+	oldBATT_Y = BATT_Y;
+
 	// Calculate text bounds for the time string
 	char *data = tod;
 	int x = CLOCK_X, y = CLOCK_Y;
@@ -216,8 +224,9 @@ void updateBatteryPosition() {
 	// Position battery 11 pixels to the right of the time text
 	BATT_X = CLOCK_X + w + 11;
 
-	// Align battery bottom with text bottom (y1 + h is the bottom of the text bounding box)
-	BATT_Y = (y1 + h) - batt_100_height;
+	// Align battery to sit on the same baseline as the time
+	// Place it so the bottom of the battery aligns with the baseline
+	BATT_Y = CLOCK_Y - batt_100_height;
 
 	// Update BATT_AREA
 	BATT_AREA.x = BATT_X;
@@ -269,6 +278,17 @@ void redrawVoltage() {
 }
 
 void drawVoltage() {
+	// Clear old battery position if it has changed
+	if (oldBATT_X >= 0 && (oldBATT_X != BATT_X || oldBATT_Y != BATT_Y)) {
+		Rect_t oldArea = {
+			.x = oldBATT_X,
+			.y = oldBATT_Y,
+			.width = batt_100_width,
+			.height = batt_100_height,
+		};
+		epd_clear_area(oldArea);
+	}
+	// Clear and draw at new position
 	epd_clear_area(BATT_AREA);
 	redrawVoltage();
 }
@@ -403,7 +423,6 @@ void redraw() {
 	redrawClock();
 	redrawWeather();
 	if (firstRun) getVoltage();
-	updateBatteryPosition();
 	redrawVoltage();
 	epd_poweroff_all();
 	time(&lastRedraw);
@@ -413,11 +432,10 @@ void partialRedraw() {
 	epd_init();
 	epd_poweron();
 	drawClock();
+	drawVoltage(); // Always redraw battery since position may have changed
 	if (_drawWeather) drawWeather();
 	if (waketime - lastVoltageUpdate >= VOLTAGE_INTERVAL) {
 		getVoltage();
-		updateBatteryPosition();
-		if (_drawVoltage) drawVoltage();
 	}
 	epd_poweroff_all();
 }
@@ -433,6 +451,7 @@ void setup() {
 		time(&waketime);
 		getClock();
 		setClock();
+		updateBatteryPosition();
 		getWeather();
 		setWeather();
 		redraw();
@@ -446,8 +465,9 @@ void setup() {
 		}
 		if (waketime - lastWeatherUpdate >= WEATHER_INTERVAL) getWeather();
 		getClock();
-		if (!r) partialRedraw();
 		setClock();
+		updateBatteryPosition();
+		if (!r) partialRedraw();
 		if (_drawWeather) setWeather();
 		if (r) redraw();
 	}
