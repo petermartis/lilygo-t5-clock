@@ -459,15 +459,16 @@ void setup() {
 		}
 		if (waketime - lastWeatherUpdate >= WEATHER_INTERVAL) getWeather();
 		getClock();
+		// Always set clock data before any drawing
+		setClock();
 		if (!r) {
+			// Partial redraw - just update time
 			partialRedraw();
 		} else {
-			// Only update battery position before full redraws
-			setClock();
+			// Full redraw - reposition battery and redraw everything
 			updateBatteryPosition();
 			redraw();
 		}
-		setClock();
 		if (_drawWeather) setWeather();
 	}
 
