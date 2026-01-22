@@ -207,12 +207,22 @@ void setClock() {
 }
 
 void updateBatteryPosition() {
+	// Safety check: ensure tod is not empty
+	if (tod[0] == '\0') {
+		return; // Don't update if time string is empty
+	}
+
 	// Calculate text bounds for the time string
 	char *data = tod;
 	int x = CLOCK_X, y = CLOCK_Y;
 	int x1, y1, w, h;
 	GFXfont *font = (GFXfont *)&NK5772B;
 	get_text_bounds(font, data, &x, &y, &x1, &y1, &w, &h, NULL);
+
+	// Safety check: ensure width is reasonable
+	if (w <= 0 || w > 500) {
+		return; // Invalid width, don't update
+	}
 
 	// Position battery 11 pixels to the right of the time text
 	BATT_X = CLOCK_X + w + 11;
@@ -416,10 +426,11 @@ void partialRedraw() {
 	epd_init();
 	epd_poweron();
 	drawClock();
+	// Always redraw battery since position may have changed with time width
+	drawVoltage();
 	if (_drawWeather) drawWeather();
 	if (waketime - lastVoltageUpdate >= VOLTAGE_INTERVAL) {
 		getVoltage();
-		if (_drawVoltage) drawVoltage();
 	}
 	epd_poweroff_all();
 }
@@ -450,7 +461,7 @@ void setup() {
 		if (waketime - lastWeatherUpdate >= WEATHER_INTERVAL) getWeather();
 		getClock();
 		setClock();
-		// Always update battery position based on current time width
+		// Update battery position before any drawing
 		updateBatteryPosition();
 		if (!r) {
 			partialRedraw();
