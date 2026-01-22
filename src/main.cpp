@@ -13,7 +13,6 @@
 #include "NK5748b.h"
 #include "NK5772b.h"
 #include "Meteocons96.h"
-#include "esp_adc_cal.h"
 #include <Wire.h>
 #include <sys/time.h>
 #include "WiFi.h"
@@ -114,7 +113,6 @@ void drawBatteryIcon(int x, int y, uint8_t level, bool clear);
 RTC_DATA_ATTR bool firstRun = true;
 RTC_DATA_ATTR int minute = -1;
 RTC_DATA_ATTR int dayOfWeek = -1;
-RTC_DATA_ATTR int vref = 1100;
 RTC_DATA_ATTR uint8_t battLevel = 0;  // 0-4 segments
 RTC_DATA_ATTR char tod[10];
 RTC_DATA_ATTR char dow[20];
@@ -266,17 +264,13 @@ void setClock() {
 
 // Battery voltage reading and icon display
 void getBatteryLevel() {
-	// ADC calibration
-	esp_adc_cal_characteristics_t adc_chars;
-	esp_adc_cal_value_t val_type = esp_adc_cal_characterize(
-		ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
-	if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) {
-		vref = adc_chars.vref;
-	}
-
-	// Read voltage (formula from LilyGo weather display)
+	// Read voltage - ESP32-S3 uses GPIO 14 (ADC2)
+	// Skip ADC calibration for now as it can cause issues with ADC2
 	uint16_t v = analogRead(BATT_PIN);
-	float voltage = ((float)v / 4096.0) * 6.566 * (vref / 1000.0);
+
+	// Simple voltage calculation for ESP32-S3
+	// GPIO 14 with 11dB attenuation, 12-bit resolution
+	float voltage = ((float)v / 4095.0) * 3.3 * 2.0;  // 2.0 for voltage divider
 
 	// Calculate percentage using polynomial (LiPo discharge curve)
 	float percentage = 2836.9625 * pow(voltage, 4)
