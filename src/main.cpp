@@ -38,8 +38,8 @@ const uint CLOCK_Y = 175;
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
 const uint DATE_Y1 = 105;
 const uint DATE_Y2 = CLOCK_Y;
-const uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width;
-const uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height;
+uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width;
+uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height;
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
 const uint START_TIME_Y = EPD_HEIGHT - V_MARGIN;
 const uint WICON_X = H_MARGIN;
@@ -69,7 +69,7 @@ const Rect_t WICON_AREA = {
 	.height = (int32_t)(BATT_Y - (EPD_HEIGHT / 2) + 10),
 };
 
-const Rect_t BATT_AREA = {
+Rect_t BATT_AREA = {
 	.x = BATT_X,
 	.y = BATT_Y,
 	.width = batt_100_width,
@@ -203,6 +203,25 @@ void setClock() {
 		strcpy(dow, _dow);
 		strcpy(mdy, _mdy);
 	}
+}
+
+void updateBatteryPosition() {
+	// Calculate text bounds for the time string
+	char *data = tod;
+	int x = CLOCK_X, y = CLOCK_Y;
+	int x1, y1, w, h;
+	setFont(NK5772B);
+	get_text_bounds(&currentFont, data, &x, &y, &x1, &y1, &w, &h, NULL);
+
+	// Position battery 11 pixels to the right of the time text
+	BATT_X = CLOCK_X + w + 11;
+
+	// Align battery bottom with text baseline
+	BATT_Y = CLOCK_Y - batt_100_height;
+
+	// Update BATT_AREA
+	BATT_AREA.x = BATT_X;
+	BATT_AREA.y = BATT_Y;
 }
 
 void getVoltage() {
@@ -384,6 +403,7 @@ void redraw() {
 	redrawClock();
 	redrawWeather();
 	if (firstRun) getVoltage();
+	updateBatteryPosition();
 	redrawVoltage();
 	epd_poweroff_all();
 	time(&lastRedraw);
@@ -396,6 +416,7 @@ void partialRedraw() {
 	if (_drawWeather) drawWeather();
 	if (waketime - lastVoltageUpdate >= VOLTAGE_INTERVAL) {
 		getVoltage();
+		updateBatteryPosition();
 		if (_drawVoltage) drawVoltage();
 	}
 	epd_poweroff_all();
