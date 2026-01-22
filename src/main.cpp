@@ -38,6 +38,7 @@ const uint CLOCK_Y = 175;
 const uint DATE_X = EPD_WIDTH - H_MARGIN;
 const uint DATE_Y1 = 105;
 const uint DATE_Y2 = CLOCK_Y;
+// Battery position - initialized to bottom right, will be repositioned dynamically
 uint BATT_X = EPD_WIDTH - H_MARGIN - batt_100_width;
 uint BATT_Y = EPD_HEIGHT - V_MARGIN - batt_100_height;
 const uint START_TIME_X = EPD_WIDTH - H_MARGIN;
@@ -207,11 +208,11 @@ void setClock() {
 
 void updateBatteryPosition() {
 	// Calculate text bounds for the time string
-	GFXfont tmpFont = NK5772B;
 	char *data = tod;
 	int x = CLOCK_X, y = CLOCK_Y;
 	int x1, y1, w, h;
-	get_text_bounds(&tmpFont, data, &x, &y, &x1, &y1, &w, &h, NULL);
+	GFXfont *font = (GFXfont *)&NK5772B;
+	get_text_bounds(font, data, &x, &y, &x1, &y1, &w, &h, NULL);
 
 	// Position battery 11 pixels to the right of the time text
 	BATT_X = CLOCK_X + w + 11;
