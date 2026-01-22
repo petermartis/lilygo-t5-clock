@@ -13,6 +13,7 @@
 #include "NK5748b.h"
 #include "NK5772b.h"
 #include "Meteocons96.h"
+#include "esp_adc_cal.h"
 #include <Wire.h>
 #include <sys/time.h>
 #include "WiFi.h"
@@ -27,6 +28,13 @@
 #define H_MARGIN 20
 #define V_MARGIN 20
 #define MQTT_MSG_HEIGHT 25
+#define BATT_PIN 36
+
+// Battery icon dimensions
+#define BATT_ICON_WIDTH 16
+#define BATT_ICON_HEIGHT 8
+#define BATT_TIP_WIDTH 2
+#define BATT_TIP_HEIGHT 4
 
 const uint CLOCK_X = H_MARGIN;
 const uint CLOCK_Y = 165;  // Moved up 10px
@@ -84,6 +92,8 @@ bool _drawFtemp = false;
 bool _drawWind = false;
 bool _drawHumidity = false;
 bool _drawMqttMsg = false;
+bool _drawBattery = false;
+uint8_t _battLevel = 0;  // 0-4 segments
 char _tod[10];
 char _dow[20];
 char _mdy[50];
@@ -101,6 +111,8 @@ enum alignment { LEFT, RIGHT, CENTER };
 RTC_DATA_ATTR bool firstRun = true;
 RTC_DATA_ATTR int minute = -1;
 RTC_DATA_ATTR int dayOfWeek = -1;
+RTC_DATA_ATTR int vref = 1100;
+RTC_DATA_ATTR uint8_t battLevel = 0;  // 0-4 segments
 RTC_DATA_ATTR char tod[10];
 RTC_DATA_ATTR char dow[20];
 RTC_DATA_ATTR char mdy[50];
@@ -185,6 +197,15 @@ void drawString(int x, int y, const char* text, const char* old_text, alignment 
 void redrawClock() {
 	setFont(NK5772B);
 	drawString(CLOCK_X, CLOCK_Y, tod, LEFT);
+
+	// Draw battery icon under time, right-justified with last character
+	int x1, y1, tw, th;
+	int xx = CLOCK_X, yy = CLOCK_Y;
+	get_text_bounds(&currentFont, tod, &xx, &yy, &x1, &y1, &tw, &th, NULL);
+	int battX = CLOCK_X + tw - BATT_ICON_WIDTH - BATT_TIP_WIDTH;
+	int battY = CLOCK_Y + 6;
+	drawBatteryIcon(battX, battY, battLevel, false);
+
 	setFont(NK5724B);
 	drawString(DATE_X, DATE_Y1, dow, RIGHT);
 	setFont(NK5715B);  // Smaller font for date
@@ -195,6 +216,17 @@ void redrawClock() {
 void drawClock() {
 	setFont(NK5772B);
 	drawString(CLOCK_X, CLOCK_Y, _tod, tod, LEFT);
+
+	// Draw battery icon if changed
+	if (_drawBattery) {
+		int x1, y1, tw, th;
+		int xx = CLOCK_X, yy = CLOCK_Y;
+		get_text_bounds(&currentFont, _tod, &xx, &yy, &x1, &y1, &tw, &th, NULL);
+		int battX = CLOCK_X + tw - BATT_ICON_WIDTH - BATT_TIP_WIDTH;
+		int battY = CLOCK_Y + 6;
+		drawBatteryIcon(battX, battY, _battLevel, true);
+	}
+
 	if (_drawDate) {
 		setFont(NK5724B);
 		drawString(DATE_X, DATE_Y1, _dow, dow, RIGHT);
@@ -226,6 +258,88 @@ void setClock() {
 		strcpy(dow, _dow);
 		strcpy(mdy, _mdy);
 		strcpy(nameDay, _nameDay);
+	}
+}
+
+// Battery voltage reading and icon display
+void getBatteryLevel() {
+	// ADC calibration
+	esp_adc_cal_characteristics_t adc_chars;
+	esp_adc_cal_value_t val_type = esp_adc_cal_characterize(
+		ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
+	if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) {
+		vref = adc_chars.vref;
+	}
+
+	// Read voltage (formula from LilyGo weather display)
+	uint16_t v = analogRead(BATT_PIN);
+	float voltage = ((float)v / 4096.0) * 6.566 * (vref / 1000.0);
+
+	// Calculate percentage using polynomial (LiPo discharge curve)
+	float percentage = 2836.9625 * pow(voltage, 4)
+	                 - 43987.4889 * pow(voltage, 3)
+	                 + 255233.8134 * pow(voltage, 2)
+	                 - 656689.7123 * voltage
+	                 + 632041.7303;
+
+	// Clamp to valid range
+	if (voltage >= 4.20) percentage = 100;
+	if (voltage <= 3.20) percentage = 0;
+	if (percentage > 100) percentage = 100;
+	if (percentage < 0) percentage = 0;
+
+	// Convert to 0-4 segments
+	uint8_t newLevel;
+	if (percentage >= 87.5) newLevel = 4;
+	else if (percentage >= 62.5) newLevel = 3;
+	else if (percentage >= 37.5) newLevel = 2;
+	else if (percentage >= 12.5) newLevel = 1;
+	else newLevel = 0;
+
+	if (newLevel != battLevel) {
+		_battLevel = newLevel;
+		_drawBattery = true;
+	} else {
+		_battLevel = battLevel;
+	}
+}
+
+void drawBatteryIcon(int x, int y, uint8_t level, bool clear) {
+	// Battery icon: 16x8 body + 2x4 tip on right
+	// x,y is top-left corner of the body
+
+	if (clear) {
+		Rect_t area = {
+			.x = x - 2,
+			.y = y - 2,
+			.width = BATT_ICON_WIDTH + BATT_TIP_WIDTH + 4,
+			.height = BATT_ICON_HEIGHT + 4,
+		};
+		epd_clear_area(area);
+	}
+
+	// Draw battery outline (body)
+	epd_draw_rect(x, y, BATT_ICON_WIDTH, BATT_ICON_HEIGHT, 0, NULL);
+
+	// Draw battery tip on right
+	int tipY = y + (BATT_ICON_HEIGHT - BATT_TIP_HEIGHT) / 2;
+	epd_fill_rect(x + BATT_ICON_WIDTH, tipY, BATT_TIP_WIDTH, BATT_TIP_HEIGHT, 0, NULL);
+
+	// Draw filled segments (4 segments inside)
+	int segWidth = 3;
+	int segHeight = BATT_ICON_HEIGHT - 4;
+	int segY = y + 2;
+	int segGap = 1;
+
+	for (int i = 0; i < level && i < 4; i++) {
+		int segX = x + 2 + i * (segWidth + segGap);
+		epd_fill_rect(segX, segY, segWidth, segHeight, 0, NULL);
+	}
+}
+
+void saveBatteryLevel() {
+	if (_drawBattery) {
+		battLevel = _battLevel;
 	}
 }
 
@@ -566,9 +680,11 @@ void setup() {
 		}
 		time(&waketime);
 		getClock();
+		getBatteryLevel();  // Read battery before drawing
 		setClock();
 		setWeather();
 		saveStatusMsg();
+		saveBatteryLevel();
 		redraw();
 		firstRun = false;
 	} else {
@@ -607,15 +723,17 @@ void setup() {
 		}
 
 		getClock();
+		getBatteryLevel();  // Check battery level
 
 		// Only power on EPD if there's something to update
-		bool needsDisplayUpdate = (strcmp(tod, _tod) != 0) || _drawDate || _drawWeather || _drawMqttMsg;
+		bool needsDisplayUpdate = (strcmp(tod, _tod) != 0) || _drawDate || _drawWeather || _drawMqttMsg || _drawBattery;
 
 		if (r) {
 			// Full redraw needed
 			setClock();
 			if (_drawWeather) setWeather();
 			if (_drawMqttMsg) saveStatusMsg();
+			saveBatteryLevel();
 			redraw();
 		} else if (needsDisplayUpdate) {
 			// Partial update needed
@@ -623,9 +741,11 @@ void setup() {
 			setClock();
 			if (_drawWeather) setWeather();
 			if (_drawMqttMsg) saveStatusMsg();
+			saveBatteryLevel();
 		} else {
 			// Nothing to update - skip EPD entirely (saves power!)
 			setClock();
+			saveBatteryLevel();
 		}
 	}
 
