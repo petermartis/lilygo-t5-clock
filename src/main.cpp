@@ -28,7 +28,7 @@
 #define H_MARGIN 20
 #define V_MARGIN 20
 #define MQTT_MSG_HEIGHT 25
-#define BATT_PIN 36
+// BATT_PIN is defined in LilyGo library (GPIO 14 for ESP32-S3)
 
 // Battery icon dimensions
 #define BATT_ICON_WIDTH 16
@@ -107,6 +107,9 @@ char _wUpdated[20];
 char _mqttMsg[128];
 time_t waketime;
 enum alignment { LEFT, RIGHT, CENTER };
+
+// Forward declarations
+void drawBatteryIcon(int x, int y, uint8_t level, bool clear);
 
 RTC_DATA_ATTR bool firstRun = true;
 RTC_DATA_ATTR int minute = -1;
