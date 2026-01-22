@@ -199,13 +199,13 @@ void redrawClock() {
 	setFont(NK5772B);
 	drawString(CLOCK_X, CLOCK_Y, tod, LEFT);
 
-	// Draw battery icon under time, right-justified with last character
-	int x1, y1, tw, th;
-	int xx = CLOCK_X, yy = CLOCK_Y;
-	get_text_bounds(&currentFont, tod, &xx, &yy, &x1, &y1, &tw, &th, NULL);
-	int battX = CLOCK_X + tw - BATT_ICON_WIDTH - BATT_TIP_WIDTH;
-	int battY = CLOCK_Y + 6;
-	drawBatteryIcon(battX, battY, battLevel, false);
+	// TODO: Battery icon temporarily disabled for debugging
+	// int x1, y1, tw, th;
+	// int xx = CLOCK_X, yy = CLOCK_Y;
+	// get_text_bounds(&currentFont, tod, &xx, &yy, &x1, &y1, &tw, &th, NULL);
+	// int battX = CLOCK_X + tw - BATT_ICON_WIDTH - BATT_TIP_WIDTH;
+	// int battY = CLOCK_Y + 6;
+	// drawBatteryIcon(battX, battY, battLevel, false);
 
 	setFont(NK5724B);
 	drawString(DATE_X, DATE_Y1, dow, RIGHT);
@@ -218,15 +218,15 @@ void drawClock() {
 	setFont(NK5772B);
 	drawString(CLOCK_X, CLOCK_Y, _tod, tod, LEFT);
 
-	// Draw battery icon if changed
-	if (_drawBattery) {
-		int x1, y1, tw, th;
-		int xx = CLOCK_X, yy = CLOCK_Y;
-		get_text_bounds(&currentFont, _tod, &xx, &yy, &x1, &y1, &tw, &th, NULL);
-		int battX = CLOCK_X + tw - BATT_ICON_WIDTH - BATT_TIP_WIDTH;
-		int battY = CLOCK_Y + 6;
-		drawBatteryIcon(battX, battY, _battLevel, true);
-	}
+	// TODO: Battery icon temporarily disabled for debugging
+	// if (_drawBattery) {
+	// 	int x1, y1, tw, th;
+	// 	int xx = CLOCK_X, yy = CLOCK_Y;
+	// 	get_text_bounds(&currentFont, _tod, &xx, &yy, &x1, &y1, &tw, &th, NULL);
+	// 	int battX = CLOCK_X + tw - BATT_ICON_WIDTH - BATT_TIP_WIDTH;
+	// 	int battY = CLOCK_Y + 6;
+	// 	drawBatteryIcon(battX, battY, _battLevel, true);
+	// }
 
 	if (_drawDate) {
 		setFont(NK5724B);
