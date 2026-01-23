@@ -230,10 +230,10 @@ void updateBatteryPosition() {
 	// X: 11 pixels to the right of the time text
 	int newBattX = CLOCK_X + w + 11;
 
-	// Y: Align battery bottom edge with text bottom edge
-	// Text bounding box bottom is at y1 + h
-	// Battery top should be at (text bottom - battery height)
-	int newBattY = (y1 + h) - batt_100_height;
+	// Y: Position battery to sit on same baseline as time
+	// CLOCK_Y is the baseline for the time text
+	// Position battery so its bottom aligns with the baseline
+	int newBattY = CLOCK_Y - batt_100_height;
 
 	// Check if position actually changed
 	if (newBattX != BATT_X || newBattY != BATT_Y) {
