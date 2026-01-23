@@ -104,6 +104,8 @@ RTC_DATA_ATTR int dayOfWeek = -1;
 RTC_DATA_ATTR int vref = 1100;
 RTC_DATA_ATTR int batt = 5;
 RTC_DATA_ATTR float voltage = -1;
+RTC_DATA_ATTR int prevBattX = -1;
+RTC_DATA_ATTR int prevBattY = -1;
 RTC_DATA_ATTR char tod[10];
 RTC_DATA_ATTR char dow[20];
 RTC_DATA_ATTR char mdy[50];
@@ -224,12 +226,16 @@ void updateBatteryPosition() {
 		return; // Invalid width, don't update
 	}
 
-	// Position battery 11 pixels to the right of the time text
-	BATT_X = CLOCK_X + w + 11;
+	// Calculate new position
+	int newBattX = CLOCK_X + w + 11;
+	int newBattY = CLOCK_Y - batt_100_height + 5;
 
-	// Align battery bottom to same line as time - adjusted to align properly
-	// The battery should sit on the baseline of the text
-	BATT_Y = CLOCK_Y - batt_100_height + 5;
+	// Check if position actually changed
+	if (newBattX != BATT_X || newBattY != BATT_Y) {
+		BATT_X = newBattX;
+		BATT_Y = newBattY;
+		_drawVoltage = true; // Force battery redraw when position changes
+	}
 
 	// Update BATT_AREA to use new position
 	BATT_AREA.x = BATT_X;
@@ -283,8 +289,23 @@ void redrawVoltage() {
 }
 
 void drawVoltage() {
+	// If position changed from previous, clear old position first
+	if (prevBattX >= 0 && prevBattY >= 0 &&
+	    (prevBattX != BATT_X || prevBattY != BATT_Y)) {
+		Rect_t oldArea = {
+			.x = prevBattX,
+			.y = prevBattY,
+			.width = batt_100_width,
+			.height = batt_100_height,
+		};
+		epd_clear_area(oldArea);
+	}
+	// Clear and draw at new position
 	epd_clear_area(BATT_AREA);
 	redrawVoltage();
+	// Remember new position
+	prevBattX = BATT_X;
+	prevBattY = BATT_Y;
 }
 
 void enableWifi() {
@@ -418,6 +439,9 @@ void redraw() {
 	redrawWeather();
 	if (firstRun) getVoltage();
 	redrawVoltage();
+	// Remember battery position (full redraw clears screen so no ghosting)
+	prevBattX = BATT_X;
+	prevBattY = BATT_Y;
 	epd_poweroff_all();
 	time(&lastRedraw);
 }
@@ -461,12 +485,13 @@ void setup() {
 		getClock();
 		// Always set clock data before any drawing
 		setClock();
+		// Update battery position before drawing (has safety checks)
+		updateBatteryPosition();
 		if (!r) {
 			// Partial redraw - just update time
 			partialRedraw();
 		} else {
-			// Full redraw - reposition battery and redraw everything
-			updateBatteryPosition();
+			// Full redraw - redraw everything
 			redraw();
 		}
 		if (_drawWeather) setWeather();
